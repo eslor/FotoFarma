@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (UID)
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - createdAt: timestamp (optional)
+    //
+    // Collection: prescriptions
+    // Document ID: prescriptionId
+    // Fields:
+    //   - uid: string (required) - Owner UID
+    //   - imageUrl: string (required)
+    //   - scannedAt: timestamp (required)
+    //   - medications: list (optional)
+    //
+    // Collection: reminders
+    // Document ID: reminderId
+    // Fields:
+    //   - uid: string (required) - Owner UID
+    //   - name: string (required)
+    //   - dosage: string (optional)
+    //   - time: string (required) - HH:mm format
+    //   - date: string (required) - YYYY-MM-DD format
+    //   - completed: bool (optional)
+    //   - prescriptionId: string (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email);
+    }
+
+    function isValidPrescription(data) {
+      return data.keys().hasAll(['uid', 'imageUrl', 'scannedAt']) &&
+             data.keys().hasOnly(['uid', 'imageUrl', 'scannedAt', 'medications']) &&
+             data.uid == request.auth.uid &&
+             data.imageUrl is string && data.imageUrl.size() < 1000000 &&
+             data.scannedAt is timestamp &&
+             ( !('medications' in data) || data.medications is list );
+    }
+
+    function isValidReminder(data) {
+      return data.keys().hasAll(['uid', 'name', 'time', 'date']) &&
+             data.keys().hasOnly(['uid', 'name', 'time', 'date', 'dosage', 'completed', 'prescriptionId']) &&
+             data.uid == request.auth.uid &&
+             data.name is string && data.name.size() < 200 &&
+             data.time is string && data.time.matches("^\\d{2}:\\d{2}$") &&
+             data.date is string && data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             ( !('dosage' in data) || (data.dosage is string && data.dosage.size() < 100) ) &&
+             ( !('completed' in data) || data.completed is bool ) &&
+             ( !('prescriptionId' in data) || data.prescriptionId is string );
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /prescriptions/{prescriptionId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidPrescription(request.resource.data);
+      allow update: if isDocOwner() && isValidPrescription(request.resource.data);
+      allow delete: if isDocOwner();
+    }
+
+    match /reminders/{reminderId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidReminder(request.resource.data);
+      allow update: if isDocOwner() && isValidReminder(request.resource.data);
+      allow delete: if isDocOwner();
+    }
+  }
+}

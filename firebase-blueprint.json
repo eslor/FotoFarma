@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Prescription": {
+      "title": "Prescription",
+      "description": "A scanned prescription document",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "scannedAt": { "type": "string", "format": "date-time" },
+        "medications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "dosage": { "type": "string" },
+              "frequency": { "type": "string" },
+              "duration": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["uid", "imageUrl", "scannedAt"]
+    },
+    "Reminder": {
+      "title": "Reminder",
+      "description": "A medication reminder",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "dosage": { "type": "string" },
+        "time": { "type": "string" },
+        "date": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "prescriptionId": { "type": "string" }
+      },
+      "required": ["uid", "name", "time", "date"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile data"
+    },
+    "/prescriptions/{prescriptionId}": {
+      "schema": "Prescription",
+      "description": "Scanned prescriptions"
+    },
+    "/reminders/{reminderId}": {
+      "schema": "Reminder",
+      "description": "Medication reminders"
+    }
+  }
+}
