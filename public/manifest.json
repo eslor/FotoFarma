@@ -2,7 +2,7 @@
   "name": "FotoFarma",
   "short_name": "FotoFarma",
   "description": "Escanea tus recetas médicas y organiza tus recordatorios automáticamente.",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#059669",
