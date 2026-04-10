@@ -1,6 +1,5 @@
 const CACHE_NAME = 'fotofarma-v1';
 const ASSETS_TO_CACHE = [
-  './',
   'index.html',
   'manifest.json'
 ];
