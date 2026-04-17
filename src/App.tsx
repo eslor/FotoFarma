@@ -708,9 +708,33 @@ export default function App() {
   }, []);
 
   const requestPermission = async () => {
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
+    if (!('Notification' in window)) {
+      alert("Tu navegador no soporta notificaciones.");
+      return;
+    }
+    
+    try {
+      // Handle both Promise-based and callback-based browsers
+      const permission = await new Promise<NotificationPermission>((resolve) => {
+        const result = Notification.requestPermission(resolve);
+        if (result) {
+          result.then(resolve);
+        }
+      });
+      
       setNotificationPermission(permission);
+      
+      if (permission === 'denied') {
+        alert("Has bloqueado las notificaciones. Por favor, actívalas en los ajustes de tu navegador para recibir alertas.");
+      } else if (permission === 'granted') {
+        new Notification("¡Notificaciones activadas!", {
+          body: "Te avisaremos cuando sea hora de tu medicina.",
+          icon: 'https://picsum.photos/seed/fotofarma/192/192'
+        });
+      }
+    } catch (err) {
+      console.error("Error requesting notifications:", err);
+      alert("Hubo un error al activar las notificaciones. Si estás en iPhone, recuerda añadir la aplicación a la pantalla de inicio primero.");
     }
   };
 
@@ -733,13 +757,28 @@ export default function App() {
 
       try {
         const snapshot = await getDocs(q);
-        snapshot.forEach(doc => {
+        snapshot.forEach(async (doc) => {
           const med = doc.data();
-          new Notification(`¡Hora de tu medicina!`, {
+          const title = `¡Hora de tu medicina!`;
+          const options = {
             body: `Es momento de tomar: ${med.name} (${med.dosage})`,
             icon: 'https://picsum.photos/seed/fotofarma/192/192',
-            badge: 'https://picsum.photos/seed/fotofarma/192/192'
-          });
+            badge: 'https://picsum.photos/seed/fotofarma/192/192',
+            tag: `med-${doc.id}`, // Prevent duplicate notifications
+            renotify: true
+          };
+
+          // Try Service Worker first (more reliable for PWA)
+          if ('serviceWorker' in navigator) {
+            const registration = await navigator.serviceWorker.ready;
+            if (registration.showNotification) {
+              registration.showNotification(title, options);
+              return;
+            }
+          }
+          
+          // Fallback to standard Notification
+          new Notification(title, options);
         });
       } catch (err) {
         console.error("Error checking notifications:", err);
