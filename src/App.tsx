@@ -605,7 +605,7 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
         } else if (err.message === 'SAFETY_BLOCK') {
           setError("La IA bloqueó el análisis por contenido sensible. Intenta con otra foto.");
         } else {
-          setError("Ocurrió un error al analizar la receta. Por favor, reintenta.");
+          setError(`Ocurrió un error técnico: ${err.message || 'Error desconocido'}`);
         }
         setIsProcessing(false);
       }
