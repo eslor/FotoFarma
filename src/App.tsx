@@ -604,6 +604,8 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
           setError("La API Key proporcionada no es válida.");
         } else if (err.message === 'SAFETY_BLOCK') {
           setError("La IA bloqueó el análisis por contenido sensible. Intenta con otra foto.");
+        } else if (err.message?.includes('leaked')) {
+          setError("Tu API Key ha sido bloqueada por seguridad (leaked). Por favor, genera una nueva en Google AI Studio y regístrala en GitHub Secrets.");
         } else {
           setError(`Ocurrió un error técnico: ${err.message || 'Error desconocido'}`);
         }
