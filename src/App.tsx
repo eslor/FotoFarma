@@ -63,40 +63,57 @@ interface Prescription {
 
 // --- Gemini Service ---
 const analyzePrescription = async (base64Image: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY;
+  
+  if (!apiKey || apiKey === 'undefined') {
+    throw new Error('API_KEY_MISSING');
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   const model = "gemini-3-flash-preview";
 
-  const prompt = "Analiza esta receta médica y extrae una lista de medicamentos. Para cada medicamento, identifica el nombre, la dosis (ej. 500mg), la frecuencia (ej. cada 8 horas) y la duración del tratamiento. Devuelve los resultados en formato JSON.";
+  const prompt = "Analiza esta receta médica y extrae una lista de medicamentos. Para cada medicamento, identifica el nombre comercial o genérico, la dosis (ej. 500mg), la frecuencia (ej. cada 8 horas) y la duración del tratamiento. Devuelve los resultados estrictamente en formato JSON según el esquema proporcionado.";
 
-  const response = await ai.models.generateContent({
-    model,
-    contents: [
-      {
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType: "image/jpeg", data: base64Image.split(',')[1] } }
-        ]
-      }
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            dosage: { type: Type.STRING },
-            frequency: { type: Type.STRING },
-            duration: { type: Type.STRING }
-          },
-          required: ["name", "dosage", "frequency"]
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: "image/jpeg", data: base64Image.split(',')[1] } }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              dosage: { type: Type.STRING },
+              frequency: { type: Type.STRING },
+              duration: { type: Type.STRING }
+            },
+            required: ["name", "dosage", "frequency"]
+          }
         }
       }
-    }
-  });
+    });
 
-  return JSON.parse(response.text);
+    if (!response.text) {
+      throw new Error('EMPTY_RESPONSE');
+    }
+
+    return JSON.parse(response.text);
+  } catch (err: any) {
+    console.error("Gemini Analysis Error:", err);
+    if (err.message?.includes('API key not valid')) throw new Error('INVALID_API_KEY');
+    if (err.message?.includes('safety')) throw new Error('SAFETY_BLOCK');
+    throw err;
+  }
 };
 
 // --- Helpers ---
@@ -566,15 +583,30 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
   const [isProcessing, setIsProcessing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [results, setResults] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const processImage = async () => {
       try {
+        setError(null);
         const meds = await analyzePrescription(capturedImage);
-        setResults(meds);
+        if (meds.length === 0) {
+          setError("No se detectaron medicamentos en la imagen. Intenta con una foto más clara.");
+        } else {
+          setResults(meds);
+        }
         setIsProcessing(false);
-      } catch (error) {
-        console.error("Gemini error:", error);
+      } catch (err: any) {
+        console.error("Gemini error:", err);
+        if (err.message === 'API_KEY_MISSING') {
+          setError("Falta la API Key en GitHub Secrets (GEMINI_API_KEY).");
+        } else if (err.message === 'INVALID_API_KEY') {
+          setError("La API Key proporcionada no es válida.");
+        } else if (err.message === 'SAFETY_BLOCK') {
+          setError("La IA bloqueó el análisis por contenido sensible. Intenta con otra foto.");
+        } else {
+          setError("Ocurrió un error al analizar la receta. Por favor, reintenta.");
+        }
         setIsProcessing(false);
       }
     };
@@ -650,6 +682,20 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
             <Loader2 className="w-16 h-16 text-emerald-500 animate-spin mb-4" />
             <p className="text-lg font-medium">IA Analizando receta...</p>
             <p className="text-sm text-zinc-400">Extrayendo medicamentos con Gemini</p>
+          </div>
+        ) : error ? (
+          <div className="absolute inset-x-0 bottom-0 p-8 bg-white rounded-t-[32px] text-center">
+            <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <X className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-bold text-zinc-900 mb-2">Error de Análisis</h3>
+            <p className="text-zinc-500 mb-8">{error}</p>
+            <button 
+              onClick={() => setView('camera')}
+              className="w-full py-4 bg-emerald-600 text-white font-semibold rounded-2xl shadow-lg hover:bg-emerald-700 transition-colors"
+            >
+              Volver a intentar
+            </button>
           </div>
         ) : (
           <div className="absolute inset-x-0 bottom-0 p-6 bg-white rounded-t-[32px] max-h-[70vh] overflow-y-auto">
