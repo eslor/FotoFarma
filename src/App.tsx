@@ -99,6 +99,14 @@ const analyzePrescription = async (base64Image: string) => {
   return JSON.parse(response.text);
 };
 
+// --- Helpers ---
+const getLocalDateString = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const parseFrequency = (frequency: string): string[] => {
   const freq = frequency.toLowerCase();
   
@@ -287,12 +295,17 @@ const CameraView = ({ setView, setCapturedImage }: { setView: (v: View) => void,
   );
 };
 
-const CalendarView = ({ setView }: { setView: (v: View) => void, key?: string }) => {
+const CalendarView = ({ setView, requestPermission, notificationPermission }: { 
+  setView: (v: View) => void, 
+  requestPermission: () => void,
+  notificationPermission: NotificationPermission,
+  key?: string 
+}) => {
   const [reminders, setReminders] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
-  const today = new Date().toISOString().split('T')[0];
-  const [selectedDate, setSelectedDate] = useState(today);
+  const todayStr = getLocalDateString(new Date());
+  const [selectedDate, setSelectedDate] = useState(todayStr);
 
   useEffect(() => {
     if (!auth.currentUser) return;
@@ -345,8 +358,8 @@ const CalendarView = ({ setView }: { setView: (v: View) => void, key?: string })
 
   const days = Array.from({ length: 31 }, (_, i) => {
     const d = new Date();
-    d.setDate(i + 1);
-    return d.toISOString().split('T')[0];
+    d.setDate(d.getDate() + i - 15); // Show 15 days before and 15 days after today
+    return getLocalDateString(d);
   });
   
   return (
@@ -362,13 +375,25 @@ const CalendarView = ({ setView }: { setView: (v: View) => void, key?: string })
         </button>
         <div className="text-center">
           <h2 className="text-xl font-bold text-zinc-900">
-            {new Date(selectedDate).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {(() => {
+              const [y, m, d] = selectedDate.split('-').map(Number);
+              return new Date(y, m - 1, d).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+            })()}
           </h2>
           <p className="text-sm text-zinc-500">
             {reminders.length} recordatorios para este día
           </p>
         </div>
         <div className="flex items-center gap-1">
+          {notificationPermission !== 'granted' && (
+            <button 
+              onClick={requestPermission}
+              className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors animate-pulse"
+              title="Activar notificaciones"
+            >
+              <Bell className="w-6 h-6" />
+            </button>
+          )}
           <button 
             onClick={() => setShowConfirm(true)}
             className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
@@ -384,7 +409,8 @@ const CalendarView = ({ setView }: { setView: (v: View) => void, key?: string })
 
       <div className="flex gap-3 overflow-x-auto pb-6 scrollbar-hide">
         {days.map(dateStr => {
-          const d = new Date(dateStr);
+          const [y, m, dayNum] = dateStr.split('-').map(Number);
+          const d = new Date(y, m - 1, dayNum);
           const isSelected = dateStr === selectedDate;
           return (
             <button 
@@ -576,7 +602,7 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
       for (let i = 0; i < 7; i++) {
         const date = new Date(today);
         date.setDate(today.getDate() + i);
-        const dateStr = date.toISOString().split('T')[0];
+        const dateStr = getLocalDateString(date);
 
         for (const med of results) {
           // Parse frequency to get actual times
@@ -673,6 +699,58 @@ export default function App() {
   const [view, setView] = useState<View>('login');
   const [user, setUser] = useState<any>(null);
   const [capturedImage, setCapturedImage] = useState<string>('');
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+
+  useEffect(() => {
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  const requestPermission = async () => {
+    if ('Notification' in window) {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+    }
+  };
+
+  // Notification Check Effect
+  useEffect(() => {
+    if (!user || notificationPermission !== 'granted') return;
+
+    const checkReminders = async () => {
+      const now = new Date();
+      // Format time as HH:MM matching our saved format
+      const timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+      const dateStr = getLocalDateString(now);
+
+      const q = query(
+        collection(db, 'reminders'),
+        where('uid', '==', user.uid),
+        where('date', '==', dateStr),
+        where('time', '==', timeStr)
+      );
+
+      try {
+        const snapshot = await getDocs(q);
+        snapshot.forEach(doc => {
+          const med = doc.data();
+          new Notification(`¡Hora de tu medicina!`, {
+            body: `Es momento de tomar: ${med.name} (${med.dosage})`,
+            icon: 'https://picsum.photos/seed/fotofarma/192/192',
+            badge: 'https://picsum.photos/seed/fotofarma/192/192'
+          });
+        });
+      } catch (err) {
+        console.error("Error checking notifications:", err);
+      }
+    };
+
+    // Check immediately and then every minute
+    checkReminders();
+    const interval = setInterval(checkReminders, 60000); 
+    return () => clearInterval(interval);
+  }, [user, notificationPermission]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -691,7 +769,7 @@ export default function App() {
       <AnimatePresence mode="wait">
         {view === 'login' && <Login key="login" />}
         {view === 'camera' && <CameraView key="camera" setView={setView} setCapturedImage={setCapturedImage} />}
-        {view === 'calendar' && <CalendarView key="calendar" setView={setView} />}
+        {view === 'calendar' && <CalendarView key="calendar" setView={setView} requestPermission={requestPermission} notificationPermission={notificationPermission} />}
         {view === 'gallery' && <GalleryView key="gallery" setView={setView} />}
         {view === 'preview' && <PreviewView key="preview" setView={setView} capturedImage={capturedImage} />}
       </AnimatePresence>
