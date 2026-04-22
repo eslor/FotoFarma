@@ -17,7 +17,6 @@ import {
   Loader2,
   Trash2
 } from 'lucide-react';
-import { GoogleGenAI, Type } from "@google/genai";
 import { 
   auth, 
   db, 
@@ -63,56 +62,24 @@ interface Prescription {
 
 // --- Gemini Service ---
 const analyzePrescription = async (base64Image: string) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  
-  if (!apiKey || apiKey === 'undefined') {
-    throw new Error('API_KEY_MISSING');
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-  const model = "gemini-3-flash-preview";
-
-  const prompt = "Analiza esta receta médica y extrae una lista de medicamentos. Para cada medicamento, identifica el nombre comercial o genérico, la dosis (ej. 500mg), la frecuencia (ej. cada 8 horas) y la duración del tratamiento. Devuelve los resultados estrictamente en formato JSON según el esquema proporcionado.";
-
   try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            { inlineData: { mimeType: "image/jpeg", data: base64Image.split(',')[1] } }
-          ]
-        }
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING },
-              dosage: { type: Type.STRING },
-              frequency: { type: Type.STRING },
-              duration: { type: Type.STRING }
-            },
-            required: ["name", "dosage", "frequency"]
-          }
-        }
-      }
+    const response = await fetch("/api/analyze-prescription", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ image: base64Image }),
     });
 
-    if (!response.text) {
-      throw new Error('EMPTY_RESPONSE');
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: "Error en el servidor" }));
+      throw new Error(errorData.message || "Error al procesar la imagen");
     }
 
-    return JSON.parse(response.text);
-  } catch (err: any) {
-    console.error("Gemini Analysis Error:", err);
-    if (err.message?.includes('API key not valid')) throw new Error('INVALID_API_KEY');
-    if (err.message?.includes('safety')) throw new Error('SAFETY_BLOCK');
-    throw err;
+    return await response.json();
+  } catch (error: any) {
+    console.error("Error analizando receta:", error);
+    throw error;
   }
 };
 
