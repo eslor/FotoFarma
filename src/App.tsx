@@ -94,6 +94,17 @@ const getLocalDateString = (date: Date): string => {
 const parseFrequency = (frequency: string): string[] => {
   const freq = frequency.toLowerCase();
   
+  // 0. Detección de Dosis Única (Prioridad máxima)
+  if (
+    freq.includes('única') || 
+    freq.includes('unica') || 
+    freq.includes('una sola vez') || 
+    freq.includes('ahora') ||
+    freq.includes('momento')
+  ) {
+    return ['09:00']; // Solo una vez, la lógica de guardado se encargará de no repetirlo
+  }
+
   // 1. Detecciones de 24 horas / 1 vez al día (Prioridad alta para evitar sobredosis)
   if (
     freq.includes('24 horas') || 
@@ -645,6 +656,14 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
         const dateStr = getLocalDateString(date);
 
         for (const med of results) {
+          // Si es dosis única, solo lo guardamos para el primer día (i === 0)
+          const isSingleDose = 
+            med.frequency.toLowerCase().includes('única') || 
+            med.frequency.toLowerCase().includes('unica') ||
+            med.frequency.toLowerCase().includes('una sola vez');
+            
+          if (isSingleDose && i > 0) continue;
+
           // Parse frequency to get actual times
           const times = parseFrequency(med.frequency);
           for (const time of times) {
