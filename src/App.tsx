@@ -94,23 +94,62 @@ const getLocalDateString = (date: Date): string => {
 const parseFrequency = (frequency: string): string[] => {
   const freq = frequency.toLowerCase();
   
-  // "cada 4 horas" -> 6 times
-  if (freq.includes('4 horas') || freq.includes('4h')) return ['04:00', '08:00', '12:00', '16:00', '20:00', '00:00'];
+  // 1. Detecciones de 24 horas / 1 vez al día (Prioridad alta para evitar sobredosis)
+  if (
+    freq.includes('24 horas') || 
+    freq.includes('24h') || 
+    freq.includes('una vez') || 
+    freq.includes('1 vez') || 
+    freq.includes('diario') || 
+    freq.includes('cada día') || 
+    freq.includes('cada dia')
+  ) {
+    return ['08:00'];
+  }
 
-  // "cada 6 horas" -> 4 times
-  if (freq.includes('6 horas') || freq.includes('6h') || freq.includes('4 veces')) return ['06:00', '12:00', '18:00', '00:00'];
+  // 2. Detecciones de 12 horas / 2 veces al día
+  if (
+    freq.includes('12 horas') || 
+    freq.includes('12h') || 
+    freq.includes('2 veces') || 
+    freq.includes('dos veces') ||
+    freq.includes('cada mañana y noche')
+  ) {
+    return ['08:00', '20:00'];
+  }
 
-  // "cada 8 horas" -> 3 times
-  if (freq.includes('8 horas') || freq.includes('8h') || freq.includes('3 veces')) return ['08:00', '16:00', '00:00'];
-  
-  // "cada 12 horas" or "2 veces al día" -> 2 times
-  if (freq.includes('12 horas') || freq.includes('12h') || freq.includes('2 veces') || freq.includes('dos veces')) return ['08:00', '20:00'];
-  
-  // "una vez al día", "cada 24 horas", "diario" -> 1 time
-  if (freq.includes('una vez') || freq.includes('24 horas') || freq.includes('diario') || freq.includes('24h') || freq.includes('1 vez')) return ['08:00'];
+  // 3. Detecciones de 8 horas / 3 veces al día
+  if (
+    freq.includes('8 horas') || 
+    freq.includes('8h') || 
+    freq.includes('3 veces') || 
+    freq.includes('tres veces')
+  ) {
+    return ['08:00', '16:00', '00:00'];
+  }
 
-  // Default fallback if no pattern matches
-  return ['08:00', '16:00', '22:00'];
+  // 4. Detecciones de 6 horas / 4 veces al día
+  if (
+    freq.includes('6 horas') || 
+    freq.includes('6h') || 
+    freq.includes('4 veces') || 
+    freq.includes('cuatro veces')
+  ) {
+    return ['06:00', '12:00', '18:00', '00:00'];
+  }
+
+  // 5. Detecciones de 4 horas / 6 veces al día
+  if (
+    freq.includes('4 horas') || 
+    freq.includes('4h') || 
+    freq.includes('6 veces') || 
+    freq.includes('seis veces')
+  ) {
+    return ['04:00', '08:00', '12:00', '16:00', '20:00', '00:00'];
+  }
+
+  // Si no coincide nada, por seguridad ponemos solo una vez al día (mejor pecar de poco que de mucho)
+  return ['09:00'];
 };
 
 // --- Components ---
