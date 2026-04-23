@@ -94,10 +94,22 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    // SPA fallback: Todas las rutas devuelven index.html
+    const distPath = path.resolve(__dirname, 'dist');
+    // Servimos los archivos estáticos primero
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.css')) {
+          res.setHeader('Content-Type', 'text/css');
+        }
+      }
+    }));
+    
+    // SPA fallback: Para cualquier otra ruta que no sea un archivo, enviamos el index.html
     app.get('*', (req, res) => {
+      // Si piden un archivo que no existe (.css, .js, .png), no enviamos el index.html
+      if (req.path.includes('.') && !req.path.endsWith('.html')) {
+        return res.status(404).send('Archivo no encontrado');
+      }
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
