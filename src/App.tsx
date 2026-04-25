@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import confetti from 'canvas-confetti';
 import { 
   Camera, 
   Calendar as CalendarIcon, 
@@ -15,7 +16,8 @@ import {
   Plus,
   LogOut,
   Loader2,
-  Trash2
+  Trash2,
+  Edit2
 } from 'lucide-react';
 import { 
   auth, 
@@ -42,7 +44,7 @@ import {
 } from 'firebase/firestore';
 
 // --- Types ---
-type View = 'login' | 'camera' | 'calendar' | 'gallery' | 'preview';
+type View = 'login' | 'dashboard' | 'camera' | 'calendar' | 'gallery' | 'preview';
 
 interface Medication {
   id?: string;
@@ -50,7 +52,8 @@ interface Medication {
   dosage: string;
   time: string;
   date: string;
-  completed?: boolean;
+  completed: boolean;
+  uid?: string;
 }
 
 interface Prescription {
@@ -165,6 +168,135 @@ const parseFrequency = (frequency: string): string[] => {
 
 // --- Components ---
 
+const DashboardView = ({ setView, user, reminders }: { 
+  setView: (v: View) => void, 
+  user: any, 
+  reminders: Medication[] 
+}) => {
+  const completedToday = reminders.filter(r => r.completed).length;
+  const totalToday = reminders.length;
+  const progress = totalToday > 0 ? Math.round((completedToday / totalToday) * 100) : 0;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className="min-h-screen bg-zinc-50 p-6 pb-24"
+    >
+      <header className="flex items-center justify-between mb-8">
+        <div>
+          <p className="text-zinc-500 text-sm font-medium">Hola, {user?.displayName?.split(' ')[0] || 'Usuario'}</p>
+          <h1 className="text-2xl font-bold text-zinc-900">Tu Salud Hoy</h1>
+        </div>
+        <button onClick={() => signOut(auth)} className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-zinc-400 border border-zinc-100">
+          <LogOut className="w-5 h-5" />
+        </button>
+      </header>
+
+      {/* Progress Card */}
+      <div className="bg-emerald-600 rounded-[32px] p-6 text-white shadow-xl shadow-emerald-100 mb-8 relative overflow-hidden">
+        <div className="relative z-10">
+          <p className="text-emerald-100 text-sm font-medium mb-1">Cumplimiento diario</p>
+          <h2 className="text-4xl font-bold mb-4">{progress}%</h2>
+          <div className="w-full bg-emerald-700/50 h-2 rounded-full overflow-hidden">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              className="h-full bg-white"
+            />
+          </div>
+          <p className="mt-4 text-sm text-emerald-50">
+            {totalToday === 0 ? 'No tienes tomas para hoy.' : 
+             progress === 100 ? '¡Excelente! Has tomado todo.' : 
+             `Te faltan ${totalToday - completedToday} dosis por tomar.`}
+          </p>
+        </div>
+        <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-3xl" />
+      </div>
+
+      {/* Bento Grid */}
+      <div className="grid grid-cols-2 gap-4 mb-8">
+        <button 
+          onClick={() => setView('camera')}
+          className="col-span-2 aspect-[2/1] bg-white p-6 rounded-[32px] border border-zinc-100 shadow-sm flex flex-col justify-between items-start group active:scale-95 transition-all text-left"
+        >
+          <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+            <Camera className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="font-bold text-zinc-900 text-lg">Analizar Receta</h3>
+            <p className="text-zinc-500 text-sm">Escanea con IA tus medicinas.</p>
+          </div>
+        </button>
+
+        <button 
+          onClick={() => setView('calendar')}
+          className="aspect-square bg-white p-6 rounded-[32px] border border-zinc-100 shadow-sm flex flex-col justify-between items-start group active:scale-95 transition-all text-left"
+        >
+          <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+            <CalendarIcon className="w-6 h-6" />
+          </div>
+          <h3 className="font-bold text-zinc-900">Calendario</h3>
+        </button>
+
+        <button 
+          onClick={() => setView('gallery')}
+          className="aspect-square bg-white p-6 rounded-[32px] border border-zinc-100 shadow-sm flex flex-col justify-between items-start group active:scale-95 transition-all text-left"
+        >
+          <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+            <ImageIcon className="w-6 h-6" />
+          </div>
+          <h3 className="font-bold text-zinc-900">Galería</h3>
+        </button>
+      </div>
+
+      {/* Upcoming Task */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-1">
+          <h3 className="font-bold text-zinc-900">Siguiente toma</h3>
+          <div className="flex gap-4">
+            <button 
+              onClick={() => {
+                const title = "¡Prueba de FotoFarma!";
+                const options = { 
+                  body: "Así llegará el aviso de tu medicina 💊",
+                  icon: 'https://picsum.photos/seed/fotofarma/192/192',
+                  tag: 'test-notification'
+                };
+                if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+                  navigator.serviceWorker.ready.then(reg => reg.showNotification(title, options));
+                } else if (Notification.permission === 'granted') {
+                  new Notification(title, options);
+                }
+              }}
+              className="text-indigo-600 text-xs font-semibold"
+            >
+              Probar aviso
+            </button>
+            <button onClick={() => setView('calendar')} className="text-emerald-600 text-sm font-semibold">Ver todo</button>
+          </div>
+        </div>
+        {reminders.filter(r => !r.completed).length === 0 ? (
+          <div className="p-6 bg-white rounded-3xl border border-dashed border-zinc-200 text-center text-zinc-400">
+            Todo al día por ahora
+          </div>
+        ) : (
+          <div className="bg-white p-4 rounded-[24px] border border-zinc-100 shadow-sm flex items-center gap-4">
+            <div className="w-12 h-12 bg-zinc-50 rounded-2xl flex items-center justify-center text-emerald-600 font-bold">
+              {reminders.find(r => !r.completed)?.time}
+            </div>
+            <div className="flex-1">
+              <h4 className="font-bold text-zinc-900">{reminders.find(r => !r.completed)?.name}</h4>
+              <p className="text-xs text-zinc-500">{reminders.find(r => !r.completed)?.dosage}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
 const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message }: { 
   isOpen: boolean, 
   onClose: () => void, 
@@ -212,32 +344,39 @@ const Login = () => {
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="flex flex-col items-center justify-center min-h-screen p-6 bg-white"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="relative flex flex-col items-center justify-center min-h-screen p-8 bg-zinc-900 overflow-hidden text-center"
     >
-      <div className="w-full max-w-md space-y-8">
-        <div className="text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 mb-4 bg-emerald-100 rounded-2xl">
-            <Bell className="w-8 h-8 text-emerald-600" />
+      <div className="absolute inset-0 z-0">
+        <div className="absolute top-0 -left-10 w-72 h-72 bg-emerald-600/20 rounded-full blur-[100px]" />
+        <div className="absolute bottom-0 -right-10 w-72 h-72 bg-indigo-600/20 rounded-full blur-[100px]" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-sm space-y-12">
+        <motion.div
+           initial={{ y: 20, opacity: 0 }}
+           animate={{ y: 0, opacity: 1 }}
+           transition={{ delay: 0.2 }}
+        >
+          <div className="inline-flex items-center justify-center w-20 h-20 mb-6 bg-emerald-500 rounded-[28px] shadow-2xl shadow-emerald-500/20">
+            <Bell className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-zinc-900">FotoFarma</h1>
-          <p className="mt-2 text-zinc-500">Tu salud, organizada en un flash.</p>
-        </div>
+          <h1 className="text-4xl font-black tracking-tight text-white mb-4">FotoFarma</h1>
+          <p className="text-zinc-400 text-lg">Analiza tus recetas médicas con IA y nunca olvides una dosis.</p>
+        </motion.div>
 
         <div className="space-y-4">
           <button 
             onClick={handleLogin}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-emerald-200"
+            className="w-full py-5 bg-white text-zinc-900 font-bold rounded-2xl flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-xl"
           >
-            Continuar con Google
-            <ArrowRight className="w-5 h-5" />
+            <User className="w-5 h-5" />
+            Empezar ahora
+            <ArrowRight className="w-5 h-5 ml-2" />
           </button>
-        </div>
-
-        <div className="text-center text-sm text-zinc-500">
-          Al continuar, aceptas nuestros <span className="text-emerald-600 font-medium cursor-pointer">Términos y Condiciones</span>
+          <p className="text-zinc-500 text-xs">Acceso seguro con Google Health Connect</p>
         </div>
       </div>
     </motion.div>
@@ -369,6 +508,25 @@ const CalendarView = ({ setView, requestPermission, notificationPermission }: {
     return () => unsubscribe();
   }, [selectedDate]);
 
+  const toggleComplete = async (med: Medication) => {
+    try {
+      await updateDoc(doc(db, 'reminders', med.id!), {
+        completed: !med.completed
+      });
+      
+      if (!med.completed) {
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#10b981', '#34d399', '#6ee7b7']
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, 'update', `reminders/${med.id}`);
+    }
+  };
+
   const deleteReminder = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'reminders', id));
@@ -469,13 +627,16 @@ const CalendarView = ({ setView, requestPermission, notificationPermission }: {
           </div>
         ) : (
           reminders.map(med => (
-            <div key={med.id} className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm flex items-center gap-4 transition-opacity">
-              <div className="flex-shrink-0 px-3 py-2 rounded-xl flex flex-col items-center justify-center font-bold text-sm bg-emerald-50 text-emerald-600">
-                <span>{med.time}</span>
-              </div>
+            <div key={med.id} className={`bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm flex items-center gap-4 transition-all ${med.completed ? 'opacity-60 grayscale-[0.5]' : ''}`}>
+              <button 
+                onClick={() => toggleComplete(med)}
+                className={`flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-sm transition-colors ${med.completed ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-600'}`}
+              >
+                {med.completed ? <Check className="w-6 h-6" /> : med.time}
+              </button>
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2">
-                  <h4 className="font-semibold text-zinc-900 truncate">{med.name}</h4>
+                  <h4 className={`font-semibold text-zinc-900 truncate ${med.completed ? 'line-through' : ''}`}>{med.name}</h4>
                 </div>
                 <p className="text-xs text-zinc-500 truncate">{med.dosage}</p>
               </div>
@@ -730,12 +891,42 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
             <h3 className="text-xl font-bold text-zinc-900 mb-4">Resultados de la IA</h3>
             <div className="space-y-3 mb-8">
               {results.map((med, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-100">
-                  <div>
-                    <p className="font-semibold text-zinc-900">{med.name}</p>
-                    <p className="text-xs text-zinc-500">{med.dosage} • {med.frequency}</p>
+                <div key={idx} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <input 
+                      type="text" 
+                      value={med.name} 
+                      onChange={(e) => {
+                        const newResults = [...results];
+                        newResults[idx].name = e.target.value;
+                        setResults(newResults);
+                      }}
+                      className="bg-transparent font-bold text-zinc-900 border-none p-0 focus:ring-0 w-full"
+                    />
+                    <Edit2 className="w-4 h-4 text-zinc-300" />
                   </div>
-                  <Check className="w-5 h-5 text-emerald-600" />
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={med.dosage} 
+                      onChange={(e) => {
+                        const newResults = [...results];
+                        newResults[idx].dosage = e.target.value;
+                        setResults(newResults);
+                      }}
+                      className="bg-transparent text-xs text-zinc-500 border-none p-0 focus:ring-0 w-full"
+                    />
+                    <input 
+                      type="text" 
+                      value={med.frequency} 
+                      onChange={(e) => {
+                        const newResults = [...results];
+                        newResults[idx].frequency = e.target.value;
+                        setResults(newResults);
+                      }}
+                      className="bg-transparent text-xs text-zinc-500 border-none p-0 focus:ring-0 w-full text-right"
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -773,6 +964,21 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [capturedImage, setCapturedImage] = useState<string>('');
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  const [remindersToday, setRemindersToday] = useState<Medication[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    const today = getLocalDateString(new Date());
+    const q = query(
+      collection(db, 'reminders'),
+      where('uid', '==', user.uid),
+      where('date', '==', today),
+      orderBy('time', 'asc')
+    );
+    return onSnapshot(q, (snapshot) => {
+      setRemindersToday(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Medication)));
+    });
+  }, [user]);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -825,7 +1031,8 @@ export default function App() {
         collection(db, 'reminders'),
         where('uid', '==', user.uid),
         where('date', '==', dateStr),
-        where('time', '==', timeStr)
+        where('time', '==', timeStr),
+        where('completed', '==', false)
       );
 
       try {
@@ -868,7 +1075,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       if (u) {
-        setView('camera');
+        setView('dashboard');
       } else {
         setView('login');
       }
@@ -880,11 +1087,30 @@ export default function App() {
     <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 selection:bg-emerald-100 selection:text-emerald-900">
       <AnimatePresence mode="wait">
         {view === 'login' && <Login key="login" />}
+        {view === 'dashboard' && <DashboardView key="dashboard" setView={setView} user={user} reminders={remindersToday} />}
         {view === 'camera' && <CameraView key="camera" setView={setView} setCapturedImage={setCapturedImage} />}
         {view === 'calendar' && <CalendarView key="calendar" setView={setView} requestPermission={requestPermission} notificationPermission={notificationPermission} />}
         {view === 'gallery' && <GalleryView key="gallery" setView={setView} />}
         {view === 'preview' && <PreviewView key="preview" setView={setView} capturedImage={capturedImage} />}
       </AnimatePresence>
+      
+      {/* Persist bottom navigation on dashboard/calendar/gallery */}
+      {view !== 'login' && view !== 'camera' && view !== 'preview' && (
+        <nav className="fixed bottom-0 inset-x-0 bg-white/80 backdrop-blur-lg border-t border-zinc-100 p-4 pb-8 flex justify-around items-center z-40">
+          <button onClick={() => setView('dashboard')} className={`p-2 transition-colors ${view === 'dashboard' ? 'text-emerald-600' : 'text-zinc-400'}`}>
+            <User className="w-6 h-6" />
+          </button>
+          <button 
+            onClick={() => setView('camera')} 
+            className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-200 -mt-8 active:scale-95 transition-all"
+          >
+            <Camera className="w-7 h-7" />
+          </button>
+          <button onClick={() => setView('calendar')} className={`p-2 transition-colors ${view === 'calendar' ? 'text-emerald-600' : 'text-zinc-400'}`}>
+            <CalendarIcon className="w-6 h-6" />
+          </button>
+        </nav>
+      )}
     </div>
   );
 }

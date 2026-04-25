@@ -20,3 +20,14 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+// Registrar el Service Worker para notificaciones
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then(registration => {
+      console.log('SW registrado con éxito:', registration.scope);
+    }, err => {
+      console.log('Fallo el registro del SW:', err);
+    });
+  });
+}
