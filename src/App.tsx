@@ -1133,7 +1133,7 @@ export default function App() {
       } else if (permission === 'granted') {
         new Notification("¡Notificaciones activadas!", {
           body: "Te avisaremos cuando sea hora de tu medicina.",
-          icon: 'https://picsum.photos/seed/fotofarma/192/192'
+          icon: '/logo.svg'
         });
         
         // Iniciamos suscripción persistente al servidor
@@ -1257,8 +1257,8 @@ export default function App() {
           const title = `¡Hora de tu medicina!`;
           const options = {
             body: `Es momento de tomar: ${med.name} (${med.dosage})`,
-            icon: 'https://picsum.photos/seed/fotofarma/192/192',
-            badge: 'https://picsum.photos/seed/fotofarma/192/192',
+            icon: '/logo.svg',
+            badge: '/logo.svg',
             tag: `med-${docSnap.id}`,
             renotify: true,
             requireInteraction: true
@@ -1355,7 +1355,7 @@ export default function App() {
     const title = "¡Prueba de FotoFarma!";
     const options = { 
       body: "Así llegará el aviso de tu medicina 💊",
-      icon: 'https://picsum.photos/seed/fotofarma/192/192',
+      icon: '/logo.svg',
       tag: 'test-notification'
     };
     if ('serviceWorker' in navigator && Notification.permission === 'granted') {
