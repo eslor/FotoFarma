@@ -50,6 +50,17 @@
         "prescriptionId": { "type": "string" }
       },
       "required": ["uid", "name", "time", "date"]
+    },
+    "PushSubscription": {
+      "title": "Push Subscription",
+      "description": "Browser push notification subscription",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "subscription": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "subscription"]
     }
   },
   "firestore": {
@@ -64,6 +75,10 @@
     "/reminders/{reminderId}": {
       "schema": "Reminder",
       "description": "Medication reminders"
+    },
+    "/push_subscriptions/{subId}": {
+      "schema": "PushSubscription",
+      "description": "Push notification subscriptions"
     }
   }
 }

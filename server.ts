@@ -5,8 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import webpush from "web-push";
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, getDocs, query, where, doc, getDoc, updateDoc, deleteDoc, setDoc } from "firebase/firestore";
+import admin from "firebase-admin";
 import fs from "fs";
 
 dotenv.config();
@@ -14,10 +13,18 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Firebase Setup for Server
+// Firebase Admin Setup for Server
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+admin.initializeApp({
+  projectId: firebaseConfig.projectId
+});
+const db = admin.firestore();
+// Si hay un databaseId específico en la config, lo usamos
+if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
+  // En firebase-admin, se puede especificar el databaseId así:
+  // @ts-ignore
+  db.databaseId = firebaseConfig.firestoreDatabaseId;
+}
 
 // Web Push Setup
 // Generamos o usamos las llaves VAPID (Las que generé antes)
@@ -51,19 +58,13 @@ async function startServer() {
       // Guardamos la suscripción en Firestore vinculada al usuario
       // Usamos un ID basado en el endpoint para evitar duplicados
       const subId = Buffer.from(subscription.endpoint).toString("base64").slice(0, 50);
-      const subRef = doc(db, "push_subscriptions", subId);
-      await updateDoc(subRef, {
+      const subRef = db.collection("push_subscriptions").doc(subId);
+      
+      await subRef.set({
         subscription,
         uid,
         updatedAt: new Date().toISOString()
-      }).catch(async () => {
-        // En Express v4/v5, setDoc funciona directamente.
-        await setDoc(subRef, {
-          subscription,
-          uid,
-          updatedAt: new Date().toISOString()
-        });
-      });
+      }, { merge: true });
 
       res.status(201).json({ success: true });
     } catch (error) {
@@ -187,14 +188,12 @@ async function startServer() {
 
     try {
       // 1. Buscamos todas las medicinas para esta hora y fecha que no estén completadas
-      const q = query(
-        collection(db, 'reminders'),
-        where('date', '==', dateStr),
-        where('time', '==', timeStr),
-        where('completed', '==', false)
-      );
+      const snapshot = await db.collection('reminders')
+        .where('date', '==', dateStr)
+        .where('time', '==', timeStr)
+        .where('completed', '==', false)
+        .get();
 
-      const snapshot = await getDocs(q);
       if (snapshot.empty) return;
 
       console.log(`[Worker] Encontrados ${snapshot.size} recordatorios. Enviando notificaciones...`);
@@ -206,8 +205,7 @@ async function startServer() {
         if (!uid) continue;
 
         // 2. Buscamos las suscripciones para este usuario
-        const subQuery = query(collection(db, "push_subscriptions"), where("uid", "==", uid));
-        const subSnapshot = await getDocs(subQuery);
+        const subSnapshot = await db.collection("push_subscriptions").where("uid", "==", uid).get();
 
         for (const subDoc of subSnapshot.docs) {
           const { subscription } = subDoc.data();
@@ -222,7 +220,7 @@ async function startServer() {
             console.error(`[Worker] Error enviando a ${subDoc.id}:`, err.statusCode);
             if (err.statusCode === 410 || err.statusCode === 404) {
               // Suscripción expirada o inválida, la borramos
-              deleteDoc(subDoc.ref).catch(() => {});
+              subDoc.ref.delete().catch(() => {});
             }
           });
         }

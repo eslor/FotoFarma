@@ -1312,6 +1312,7 @@ export default function App() {
     // Para la demo: activamos la alarma visual y sonora inmediatamente
     const testMed: Medication = {
       id: 'demo-med',
+      uid: user.uid,
       name: 'Medicina Demo',
       dosage: '1 pastilla de prueba',
       time: 'AHORA',
