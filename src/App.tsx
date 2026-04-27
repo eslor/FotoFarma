@@ -17,7 +17,8 @@ import {
   LogOut,
   Loader2,
   Trash2,
-  Edit2
+  Edit2,
+  Download
 } from 'lucide-react';
 import { 
   auth, 
@@ -173,6 +174,8 @@ interface DashboardProps {
   user: any;
   reminders: Medication[];
   onTestAlarm: () => void;
+  installPrompt: any;
+  onInstall: () => void;
   key?: string;
 }
 
@@ -218,7 +221,7 @@ const AlarmOverlay = ({ med, onConfirm, onStop }: { med: Medication, onConfirm: 
   );
 };
 
-const DashboardView = ({ setView, user, reminders, onTestAlarm }: DashboardProps) => {
+const DashboardView = ({ setView, user, reminders, onTestAlarm, installPrompt, onInstall }: DashboardProps) => {
   const completedToday = reminders.filter(r => r.completed).length;
   const totalToday = reminders.length;
   const progress = totalToday > 0 ? Math.round((completedToday / totalToday) * 100) : 0;
@@ -239,6 +242,27 @@ const DashboardView = ({ setView, user, reminders, onTestAlarm }: DashboardProps
           <LogOut className="w-5 h-5" />
         </button>
       </header>
+
+      {/* PWA Install Banner */}
+      {installPrompt && (
+        <div className="mb-8 p-4 bg-indigo-600 rounded-[32px] text-white flex items-center justify-between shadow-xl shadow-indigo-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/20 rounded-2xl flex items-center justify-center">
+              <Download className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold opacity-80 uppercase leading-none mb-1">¡Instala FotoFarma!</p>
+              <p className="text-sm font-black">Alarmas siempre activas</p>
+            </div>
+          </div>
+          <button 
+            onClick={onInstall}
+            className="px-4 py-2 bg-white text-indigo-600 rounded-2xl font-bold text-xs active:scale-95 transition-transform"
+          >
+            INSTALAR
+          </button>
+        </div>
+      )}
 
       {/* Progress Card */}
       <div className="bg-emerald-600 rounded-[32px] p-6 text-white shadow-xl shadow-emerald-100 mb-8 relative overflow-hidden">
@@ -1113,6 +1137,24 @@ export default function App() {
     }
   };
 
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    });
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setInstallPrompt(null);
+    }
+  };
+
   const [activeAlarm, setActiveAlarm] = useState<Medication | null>(null);
   const notifiedIds = useRef<Set<string>>(new Set());
   const alarmSound = useRef<HTMLAudioElement | null>(null);
@@ -1269,7 +1311,17 @@ export default function App() {
 
       <AnimatePresence mode="wait">
         {view === 'login' && <Login key="login" />}
-        {view === 'dashboard' && <DashboardView key="dashboard" setView={setView} user={user} reminders={remindersToday} onTestAlarm={handleTestAlarm} />}
+        {view === 'dashboard' && (
+          <DashboardView 
+            key="dashboard" 
+            setView={setView} 
+            user={user} 
+            reminders={remindersToday} 
+            onTestAlarm={handleTestAlarm} 
+            installPrompt={installPrompt}
+            onInstall={handleInstall}
+          />
+        )}
         {view === 'camera' && <CameraView key="camera" setView={setView} setCapturedImage={setCapturedImage} />}
         {view === 'calendar' && <CalendarView key="calendar" setView={setView} requestPermission={requestPermission} notificationPermission={notificationPermission} toggleComplete={toggleComplete} />}
         {view === 'gallery' && <GalleryView key="gallery" setView={setView} />}
