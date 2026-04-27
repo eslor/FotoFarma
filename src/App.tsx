@@ -1152,11 +1152,15 @@ export default function App() {
         applicationServerKey: urlBase64ToUint8Array("BMSBMHIHH8YkhmEbHrAZGb2N4kQfVSoQ4XemexmJaT7tDVq_Ft7y1TQ2UkiQWQW2mSTfZWCm6ctsNYRUQqVc8js")
       });
 
-      // Enviar la suscripción a nuestro servidor
+      // Enviar la suscripción a nuestro servidor con el offset de zona horaria
       await fetch('/api/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription, userId })
+        body: JSON.stringify({ 
+          subscription, 
+          userId,
+          timezoneOffset: new Date().getTimezoneOffset() // Minutos de diferencia con UTC
+        })
       });
 
       console.log("Suscripción Push exitosa");

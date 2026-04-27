@@ -51,20 +51,19 @@ async function startServer() {
 
   // Nueva ruta para guardar suscripciones de push
   app.post("/api/subscribe", async (req, res) => {
-    const { subscription, userId: uid } = req.body;
+    const { subscription, userId: uid, timezoneOffset } = req.body;
     if (!subscription || !uid) {
       return res.status(400).json({ error: "Faltan datos de suscripción o usuario." });
     }
 
     try {
-      // Guardamos la suscripción en Firestore vinculada al usuario
-      // Usamos un ID basado en el endpoint para evitar duplicados
       const subId = Buffer.from(subscription.endpoint).toString("base64").slice(0, 50);
       const subRef = db.collection("push_subscriptions").doc(subId);
       
       await subRef.set({
         subscription,
         uid,
+        timezoneOffset: timezoneOffset || 0,
         updatedAt: new Date().toISOString()
       }, { merge: true });
 
@@ -178,39 +177,50 @@ async function startServer() {
   let lastCheckedTime = "";
 
   const checkRemindersAndPush = async () => {
-    const now = new Date();
-    const timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    const nowUtc = new Date();
+    const minuteKey = nowUtc.toISOString().slice(0, 16); // YYYY-MM-DDTHH:mm
     
-    // Solo ejecutamos una vez por minuto
-    if (timeStr === lastCheckedTime) return;
-    lastCheckedTime = timeStr;
+    if (minuteKey === lastCheckedTime) return;
+    lastCheckedTime = minuteKey;
 
-    const dateStr = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
-    console.log(`[Worker] Revisando recordatorios para ${dateStr} ${timeStr}...`);
+    console.log(`[Worker] Iniciando ciclo de revisión: ${nowUtc.toISOString()}`);
 
     try {
-      // 1. Buscamos todas las medicinas para esta hora y fecha que no estén completadas
-      const snapshot = await db.collection('reminders')
-        .where('date', '==', dateStr)
-        .where('time', '==', timeStr)
-        .where('completed', '==', false)
-        .get();
+      // 1. Obtenemos todas las suscripciones activas
+      const subSnapshot = await db.collection("push_subscriptions").get();
+      if (subSnapshot.empty) return;
 
-      if (snapshot.empty) return;
+      // Usamos un Set para no procesar el mismo usuario/hora varias veces si tiene múltiples dispositivos
+      const processedUsers = new Set();
 
-      console.log(`[Worker] Encontrados ${snapshot.size} recordatorios. Enviando notificaciones...`);
+      for (const subDoc of subSnapshot.docs) {
+        const { subscription, uid, timezoneOffset } = subDoc.data();
+        if (!uid || !subscription) continue;
 
-      for (const docSnap of snapshot.docs) {
-        const med = docSnap.data();
-        const uid = med.uid;
+        // Calcular hora local del usuario
+        // timezoneOffset es en minutos (ej. 360 para UTC-6)
+        const localTime = new Date(nowUtc.getTime() - (timezoneOffset * 60000));
+        const dateStr = localTime.toISOString().split('T')[0];
+        const timeStr = localTime.getUTCHours().toString().padStart(2, '0') + ':' + localTime.getUTCMinutes().toString().padStart(2, '0');
 
-        if (!uid) continue;
+        const userKey = `${uid}_${dateStr}_${timeStr}`;
+        if (processedUsers.has(userKey)) continue;
+        processedUsers.add(userKey);
 
-        // 2. Buscamos las suscripciones para este usuario
-        const subSnapshot = await db.collection("push_subscriptions").where("uid", "==", uid).get();
+        // 2. Buscar recordatorios para este usuario en su hora local
+        const remindersSnapshot = await db.collection('reminders')
+          .where('uid', '==', uid)
+          .where('date', '==', dateStr)
+          .where('time', '==', timeStr)
+          .where('completed', '==', false)
+          .get();
 
-        for (const subDoc of subSnapshot.docs) {
-          const { subscription } = subDoc.data();
+        if (remindersSnapshot.empty) continue;
+
+        console.log(`[Worker] Enviando ${remindersSnapshot.size} notificaciones a usuario ${uid} (Hora local: ${timeStr})`);
+
+        for (const remDocSnap of remindersSnapshot.docs) {
+          const med = remDocSnap.data();
           
           const payload = JSON.stringify({
             title: "¡Hora de tu medicina! 💊",
@@ -221,7 +231,6 @@ async function startServer() {
           webpush.sendNotification(subscription, payload).catch(err => {
             console.error(`[Worker] Error enviando a ${subDoc.id}:`, err.statusCode);
             if (err.statusCode === 410 || err.statusCode === 404) {
-              // Suscripción expirada o inválida, la borramos
               subDoc.ref.delete().catch(() => {});
             }
           });
