@@ -138,12 +138,13 @@ async function startServer() {
     }
 
     try {
-      const genAI = new GoogleGenAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const client = new GoogleGenAI({ apiKey });
+      const model = "gemini-1.5-flash"; 
 
       const prompt = "Analiza esta receta médica y extrae una lista de medicamentos. Para cada medicamento, identifica el nombre comercial o genérico, la dosis (ej. 500mg), la frecuencia (ej. cada 8 horas) y la duración del tratamiento. Devuelve los resultados estrictamente en formato JSON según el esquema proporcionado.";
 
-      const result = await model.generateContent({
+      const response = await client.models.generateContent({
+        model,
         contents: [
           {
             role: "user",
@@ -153,7 +154,7 @@ async function startServer() {
             ]
           }
         ],
-        generationConfig: {
+        config: {
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
@@ -171,7 +172,7 @@ async function startServer() {
         }
       });
 
-      const responseText = result.response.text();
+      const responseText = response.text;
       if (!responseText) {
         throw new Error("No se pudo obtener una respuesta legible de la IA.");
       }
