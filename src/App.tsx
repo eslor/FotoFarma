@@ -168,11 +168,13 @@ const parseFrequency = (frequency: string): string[] => {
 
 // --- Components ---
 
-const DashboardView = ({ setView, user, reminders }: { 
-  setView: (v: View) => void, 
-  user: any, 
-  reminders: Medication[] 
-}) => {
+interface DashboardProps {
+  setView: (v: View) => void;
+  user: any;
+  reminders: Medication[];
+}
+
+const DashboardView = ({ setView, user, reminders }: DashboardProps) => {
   const completedToday = reminders.filter(r => r.completed).length;
   const totalToday = reminders.length;
   const progress = totalToday > 0 ? Math.round((completedToday / totalToday) * 100) : 0;
@@ -468,12 +470,13 @@ const CameraView = ({ setView, setCapturedImage }: { setView: (v: View) => void,
   );
 };
 
-const CalendarView = ({ setView, requestPermission, notificationPermission }: { 
-  setView: (v: View) => void, 
-  requestPermission: () => void,
-  notificationPermission: NotificationPermission,
-  key?: string 
-}) => {
+interface CalendarViewProps {
+  setView: (v: View) => void;
+  requestPermission: () => void;
+  notificationPermission: NotificationPermission;
+}
+
+const CalendarView = ({ setView, requestPermission, notificationPermission }: CalendarViewProps) => {
   const [reminders, setReminders] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -635,8 +638,24 @@ const CalendarView = ({ setView, requestPermission, notificationPermission }: {
                 {med.completed ? <Check className="w-6 h-6" /> : med.time}
               </button>
               <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-2">
-                  <h4 className={`font-semibold text-zinc-900 truncate ${med.completed ? 'line-through' : ''}`}>{med.name}</h4>
+                <div className="flex items-center gap-2">
+                  <h4 className={`font-semibold text-zinc-900 truncate ${med.completed ? 'line-through' : ''}`}>
+                    {med.name}
+                  </h4>
+                  <input 
+                    type="time" 
+                    value={med.time}
+                    onChange={async (e) => {
+                      try {
+                        await updateDoc(doc(db, 'reminders', med.id!), {
+                          time: e.target.value
+                        });
+                      } catch (error) {
+                        handleFirestoreError(error, 'update', `reminders/${med.id}`);
+                      }
+                    }}
+                    className="ml-auto bg-zinc-50 border border-zinc-100 rounded-lg px-2 py-1 text-xs font-bold text-zinc-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                  />
                 </div>
                 <p className="text-xs text-zinc-500 truncate">{med.dosage}</p>
               </div>
@@ -663,7 +682,11 @@ const CalendarView = ({ setView, requestPermission, notificationPermission }: {
   );
 };
 
-const GalleryView = ({ setView }: { setView: (v: View) => void, key?: string }) => {
+interface GalleryViewProps {
+  setView: (v: View) => void;
+}
+
+const GalleryView = ({ setView }: GalleryViewProps) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [loading, setLoading] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -757,7 +780,12 @@ const GalleryView = ({ setView }: { setView: (v: View) => void, key?: string }) 
   );
 };
 
-const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, capturedImage: string, key?: string }) => {
+interface PreviewViewProps {
+  setView: (v: View) => void;
+  capturedImage: string;
+}
+
+const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
   const [isProcessing, setIsProcessing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [results, setResults] = useState<any[]>([]);
@@ -771,7 +799,11 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
         if (meds.length === 0) {
           setError("No se detectaron medicamentos en la imagen. Intenta con una foto más clara.");
         } else {
-          setResults(meds);
+          const enhancedResults = meds.map((m: any) => ({
+            ...m,
+            times: parseFrequency(m.frequency)
+          }));
+          setResults(enhancedResults);
         }
         setIsProcessing(false);
       } catch (err: any) {
@@ -825,8 +857,8 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
             
           if (isSingleDose && i > 0) continue;
 
-          // Parse frequency to get actual times
-          const times = parseFrequency(med.frequency);
+          // Usar los horarios definidos por el usuario (o sugeridos inicialmente)
+          const times = med.times || parseFrequency(med.frequency);
           for (const time of times) {
             const rRef = doc(collection(db, 'reminders'));
             batch.set(rRef, {
@@ -886,12 +918,16 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
             </button>
           </div>
         ) : (
-          <div className="absolute inset-x-0 bottom-0 p-6 bg-white rounded-t-[32px] max-h-[70vh] overflow-y-auto">
+          <div className="absolute inset-x-0 bottom-0 p-6 bg-white rounded-t-[32px] max-h-[85vh] overflow-y-auto">
             <div className="w-12 h-1.5 bg-zinc-200 rounded-full mx-auto mb-6" />
-            <h3 className="text-xl font-bold text-zinc-900 mb-4">Resultados de la IA</h3>
-            <div className="space-y-3 mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-zinc-900">Configurar Horarios</h3>
+              <span className="text-xs font-semibold px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg">IA Detectado</span>
+            </div>
+            
+            <div className="space-y-4 mb-8">
               {results.map((med, idx) => (
-                <div key={idx} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-2">
+                <div key={idx} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-3">
                   <div className="flex items-center justify-between">
                     <input 
                       type="text" 
@@ -901,10 +937,11 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
                         newResults[idx].name = e.target.value;
                         setResults(newResults);
                       }}
-                      className="bg-transparent font-bold text-zinc-900 border-none p-0 focus:ring-0 w-full"
+                      className="bg-transparent font-bold text-zinc-900 border-none p-0 focus:ring-0 w-full text-lg"
                     />
-                    <Edit2 className="w-4 h-4 text-zinc-300" />
+                    <Edit2 className="w-4 h-4 text-emerald-500" />
                   </div>
+
                   <div className="flex gap-2">
                     <input 
                       type="text" 
@@ -914,18 +951,60 @@ const PreviewView = ({ setView, capturedImage }: { setView: (v: View) => void, c
                         newResults[idx].dosage = e.target.value;
                         setResults(newResults);
                       }}
-                      className="bg-transparent text-xs text-zinc-500 border-none p-0 focus:ring-0 w-full"
+                      className="flex-1 bg-white px-3 py-1.5 rounded-lg text-sm text-zinc-600 border border-zinc-200 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                      placeholder="Dosis"
                     />
                     <input 
                       type="text" 
                       value={med.frequency} 
-                      onChange={(e) => {
-                        const newResults = [...results];
-                        newResults[idx].frequency = e.target.value;
-                        setResults(newResults);
-                      }}
-                      className="bg-transparent text-xs text-zinc-500 border-none p-0 focus:ring-0 w-full text-right"
+                      readOnly
+                      className="flex-1 bg-zinc-100 px-3 py-1.5 rounded-lg text-xs text-zinc-400 border border-transparent outline-none cursor-default"
+                      placeholder="Frecuencia"
                     />
+                  </div>
+
+                  {/* Edición de Horarios Individuales */}
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Horas de las tomas</p>
+                    <div className="flex flex-wrap gap-2">
+                      {med.times?.map((time: string, timeIdx: number) => (
+                        <div key={timeIdx} className="relative group">
+                          <input 
+                            type="time" 
+                            value={time}
+                            onChange={(e) => {
+                              const newResults = [...results];
+                              newResults[idx].times[timeIdx] = e.target.value;
+                              setResults(newResults);
+                            }}
+                            className="bg-white border border-zinc-200 rounded-xl px-2 py-1.5 text-sm font-medium text-emerald-600 focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                          <button 
+                            onClick={() => {
+                              const newResults = [...results];
+                              newResults[idx].times.splice(timeIdx, 1);
+                              setResults(newResults);
+                            }}
+                            className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow-sm hover:bg-rose-600"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                      <button 
+                        onClick={() => {
+                          const newResults = [...results];
+                          const lastTime = med.times[med.times.length - 1] || '08:00';
+                          const [h, m] = lastTime.split(':').map(Number);
+                          const nextH = (h + 4) % 24;
+                          newResults[idx].times.push(`${String(nextH).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+                          setResults(newResults);
+                        }}
+                        className="w-10 h-8 border-2 border-dashed border-zinc-200 rounded-xl flex items-center justify-center text-zinc-400 hover:border-emerald-500 hover:text-emerald-500 transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
