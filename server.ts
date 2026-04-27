@@ -5,7 +5,8 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import webpush from "web-push";
-import admin from "firebase-admin";
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 import fs from "fs";
 
 dotenv.config();
@@ -16,17 +17,21 @@ const __dirname = path.dirname(__filename);
 // Firebase Admin Setup for Server
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
 
-admin.initializeApp({
-  projectId: firebaseConfig.projectId
-});
+// En Cloud Run/AI Studio, el entorno suele autoconfigurarse. 
+if (getApps().length === 0) {
+  initializeApp({
+    projectId: firebaseConfig.projectId
+  });
+}
 
-// Importación dinámica para evitar conflictos
-const { getFirestore: getAdminFirestore } = await import('firebase-admin/firestore');
+const databaseId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)')
+  ? firebaseConfig.firestoreDatabaseId
+  : undefined;
 
-// Inicialización correcta para bases de datos nombradas en Firebase Admin
-const db = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)')
-  ? getAdminFirestore(admin.app(), firebaseConfig.firestoreDatabaseId)
-  : getAdminFirestore(admin.app());
+console.log(`[Firebase Admin] Proyecto: ${firebaseConfig.projectId}, DB: ${databaseId || 'default'}`);
+
+// Instanciar la base de datos específica si existe
+const db = databaseId ? getFirestore(databaseId) : getFirestore();
 
 // Web Push Setup
 // Generamos o usamos las llaves VAPID (Las que generé antes)
@@ -186,15 +191,24 @@ async function startServer() {
     console.log(`[Worker] Iniciando ciclo de revisión: ${nowUtc.toISOString()}`);
 
     try {
+      console.log(`[Worker] Consultando suscripciones en DB: ${databaseId || 'default'}...`);
       // 1. Obtenemos todas las suscripciones activas
       const subSnapshot = await db.collection("push_subscriptions").get();
-      if (subSnapshot.empty) return;
+      if (subSnapshot.empty) {
+        console.log("[Worker] No hay suscripciones registradas.");
+        return;
+      }
+      console.log(`[Worker] Encontradas ${subSnapshot.size} suscripciones.`);
 
       // Usamos un Set para no procesar el mismo usuario/hora varias veces si tiene múltiples dispositivos
       const processedUsers = new Set();
 
       for (const subDoc of subSnapshot.docs) {
-        const { subscription, uid, timezoneOffset } = subDoc.data();
+        const data = subDoc.data();
+        const subscription = data.subscription;
+        const uid = data.uid || data.userId;
+        const timezoneOffset = data.timezoneOffset;
+        
         if (!uid || !subscription) continue;
 
         // Calcular hora local del usuario
