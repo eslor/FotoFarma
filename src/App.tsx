@@ -172,6 +172,8 @@ interface DashboardProps {
   setView: (v: View) => void;
   user: any;
   reminders: Medication[];
+  onTestAlarm: () => void;
+  key?: string;
 }
 
 const AlarmOverlay = ({ med, onConfirm, onStop }: { med: Medication, onConfirm: () => void, onStop: () => void }) => {
@@ -216,7 +218,7 @@ const AlarmOverlay = ({ med, onConfirm, onStop }: { med: Medication, onConfirm: 
   );
 };
 
-const DashboardView = ({ setView, user, reminders }: DashboardProps) => {
+const DashboardView = ({ setView, user, reminders, onTestAlarm }: DashboardProps) => {
   const completedToday = reminders.filter(r => r.completed).length;
   const totalToday = reminders.length;
   const progress = totalToday > 0 ? Math.round((completedToday / totalToday) * 100) : 0;
@@ -301,30 +303,7 @@ const DashboardView = ({ setView, user, reminders }: DashboardProps) => {
           <h3 className="font-bold text-zinc-900">Siguiente toma</h3>
           <div className="flex gap-4">
             <button 
-              onClick={() => {
-                // Para la demo: activamos la alarma visual y sonora inmediatamente
-                const testMed: Medication = {
-                  id: 'demo-med',
-                  name: 'Medicina Demo',
-                  dosage: '1 pastilla de prueba',
-                  time: 'AHORA',
-                  date: '',
-                  completed: false
-                };
-                setActiveAlarm(testMed);
-                alarmSound.current?.play().catch(() => {});
-                
-                // También enviamos notificación push
-                const title = "¡Prueba de FotoFarma!";
-                const options = { 
-                  body: "Así llegará el aviso de tu medicina 💊",
-                  icon: 'https://picsum.photos/seed/fotofarma/192/192',
-                  tag: 'test-notification'
-                };
-                if ('serviceWorker' in navigator && Notification.permission === 'granted') {
-                  navigator.serviceWorker.ready.then(reg => reg.showNotification(title, options));
-                }
-              }}
+              onClick={onTestAlarm}
               className="text-indigo-600 text-xs font-semibold px-2 py-1 bg-indigo-50 rounded-lg"
             >
               Probar Alarma 🔔
@@ -527,9 +506,11 @@ interface CalendarViewProps {
   setView: (v: View) => void;
   requestPermission: () => void;
   notificationPermission: NotificationPermission;
+  toggleComplete: (med: Medication) => Promise<void>;
+  key?: string;
 }
 
-const CalendarView = ({ setView, requestPermission, notificationPermission }: CalendarViewProps) => {
+const CalendarView = ({ setView, requestPermission, notificationPermission, toggleComplete }: CalendarViewProps) => {
   const [reminders, setReminders] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -563,25 +544,6 @@ const CalendarView = ({ setView, requestPermission, notificationPermission }: Ca
 
     return () => unsubscribe();
   }, [selectedDate]);
-
-  const toggleComplete = async (med: Medication) => {
-    try {
-      await updateDoc(doc(db, 'reminders', med.id!), {
-        completed: !med.completed
-      });
-      
-      if (!med.completed) {
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#10b981', '#34d399', '#6ee7b7']
-        });
-      }
-    } catch (error) {
-      handleFirestoreError(error, 'update', `reminders/${med.id}`);
-    }
-  };
 
   const deleteReminder = async (id: string) => {
     try {
@@ -737,6 +699,7 @@ const CalendarView = ({ setView, requestPermission, notificationPermission }: Ca
 
 interface GalleryViewProps {
   setView: (v: View) => void;
+  key?: string;
 }
 
 const GalleryView = ({ setView }: GalleryViewProps) => {
@@ -836,6 +799,7 @@ const GalleryView = ({ setView }: GalleryViewProps) => {
 interface PreviewViewProps {
   setView: (v: View) => void;
   capturedImage: string;
+  key?: string;
 }
 
 const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
@@ -1242,6 +1206,52 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  const toggleComplete = async (med: Medication) => {
+    if (!med.id) return;
+    try {
+      await updateDoc(doc(db, 'reminders', med.id), {
+        completed: !med.completed
+      });
+      
+      if (!med.completed) {
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#10b981', '#34d399', '#6ee7b7']
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, 'update', `reminders/${med.id}`);
+    }
+  };
+
+  const handleTestAlarm = async () => {
+    // Para la demo: activamos la alarma visual y sonora inmediatamente
+    const testMed: Medication = {
+      id: 'demo-med',
+      name: 'Medicina Demo',
+      dosage: '1 pastilla de prueba',
+      time: 'AHORA',
+      date: '',
+      completed: false
+    };
+    setActiveAlarm(testMed);
+    alarmSound.current?.play().catch(() => {});
+    
+    // También enviamos notificación push
+    const title = "¡Prueba de FotoFarma!";
+    const options = { 
+      body: "Así llegará el aviso de tu medicina 💊",
+      icon: 'https://picsum.photos/seed/fotofarma/192/192',
+      tag: 'test-notification'
+    };
+    if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+      const reg = await navigator.serviceWorker.ready;
+      reg.showNotification(title, options);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 selection:bg-emerald-100 selection:text-emerald-900">
       <AnimatePresence>
@@ -1259,9 +1269,9 @@ export default function App() {
 
       <AnimatePresence mode="wait">
         {view === 'login' && <Login key="login" />}
-        {view === 'dashboard' && <DashboardView key="dashboard" setView={setView} user={user} reminders={remindersToday} />}
+        {view === 'dashboard' && <DashboardView key="dashboard" setView={setView} user={user} reminders={remindersToday} onTestAlarm={handleTestAlarm} />}
         {view === 'camera' && <CameraView key="camera" setView={setView} setCapturedImage={setCapturedImage} />}
-        {view === 'calendar' && <CalendarView key="calendar" setView={setView} requestPermission={requestPermission} notificationPermission={notificationPermission} />}
+        {view === 'calendar' && <CalendarView key="calendar" setView={setView} requestPermission={requestPermission} notificationPermission={notificationPermission} toggleComplete={toggleComplete} />}
         {view === 'gallery' && <GalleryView key="gallery" setView={setView} />}
         {view === 'preview' && <PreviewView key="preview" setView={setView} capturedImage={capturedImage} />}
       </AnimatePresence>
