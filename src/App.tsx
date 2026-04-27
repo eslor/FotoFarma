@@ -1101,6 +1101,12 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    if (user && Notification.permission === 'granted') {
+      subscribeUserToPush(user.uid);
+    }
+  }, [user]);
+
+  useEffect(() => {
     if ('Notification' in window) {
       setNotificationPermission(Notification.permission);
     }

@@ -5,7 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import webpush from "web-push";
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { initializeApp, getApps, getApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from "fs";
 
@@ -31,7 +31,7 @@ const databaseId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firesto
 console.log(`[Firebase Admin] Proyecto: ${firebaseConfig.projectId}, DB: ${databaseId || 'default'}`);
 
 // Instanciar la base de datos específica si existe
-const db = databaseId ? getFirestore(databaseId) : getFirestore();
+const db = getFirestore(getApp(), databaseId);
 
 // Web Push Setup
 // Generamos o usamos las llaves VAPID (Las que generé antes)
@@ -198,7 +198,7 @@ async function startServer() {
         console.log("[Worker] No hay suscripciones registradas.");
         return;
       }
-      console.log(`[Worker] Encontradas ${subSnapshot.size} suscripciones.`);
+      console.log(`[Worker] Encontradas ${subSnapshot.size} suscripciones totales.`);
 
       // Usamos un Set para no procesar el mismo usuario/hora varias veces si tiene múltiples dispositivos
       const processedUsers = new Set();
@@ -209,10 +209,12 @@ async function startServer() {
         const uid = data.uid || data.userId;
         const timezoneOffset = data.timezoneOffset;
         
-        if (!uid || !subscription) continue;
+        if (!uid || !subscription) {
+          console.log(`[Worker] Suscripción inválida o incompleta para doc ${subDoc.id}`);
+          continue;
+        }
 
         // Calcular hora local del usuario
-        // timezoneOffset es en minutos (ej. 360 para UTC-6)
         const localTime = new Date(nowUtc.getTime() - (timezoneOffset * 60000));
         const dateStr = localTime.toISOString().split('T')[0];
         const timeStr = localTime.getUTCHours().toString().padStart(2, '0') + ':' + localTime.getUTCMinutes().toString().padStart(2, '0');
@@ -220,6 +222,8 @@ async function startServer() {
         const userKey = `${uid}_${dateStr}_${timeStr}`;
         if (processedUsers.has(userKey)) continue;
         processedUsers.add(userKey);
+
+        console.log(`[Worker] Revisando recordatorios para usuario ${uid} en su hora local ${dateStr} ${timeStr}`);
 
         // 2. Buscar recordatorios para este usuario en su hora local
         const remindersSnapshot = await db.collection('reminders')
@@ -229,9 +233,12 @@ async function startServer() {
           .where('completed', '==', false)
           .get();
 
-        if (remindersSnapshot.empty) continue;
+        if (remindersSnapshot.empty) {
+          // console.log(`[Worker] No hay recordatorios para ${uid} a las ${timeStr}`);
+          continue;
+        }
 
-        console.log(`[Worker] Enviando ${remindersSnapshot.size} notificaciones a usuario ${uid} (Hora local: ${timeStr})`);
+        console.log(`[Worker] ¡ÉXITO! Encontrados ${remindersSnapshot.size} recordatorios para enviar a ${uid}`);
 
         for (const remDocSnap of remindersSnapshot.docs) {
           const med = remDocSnap.data();
@@ -242,16 +249,20 @@ async function startServer() {
             icon: "https://picsum.photos/seed/fotofarma/192/192"
           });
 
-          webpush.sendNotification(subscription, payload).catch(err => {
-            console.error(`[Worker] Error enviando a ${subDoc.id}:`, err.statusCode);
-            if (err.statusCode === 410 || err.statusCode === 404) {
-              subDoc.ref.delete().catch(() => {});
-            }
-          });
+          console.log(`[Worker] Enviando notificación push a endpoint: ${subscription.endpoint.slice(0, 30)}...`);
+          webpush.sendNotification(subscription, payload)
+            .then(() => console.log(`[Worker] Notificación enviada con éxito a ${uid}`))
+            .catch(err => {
+              console.error(`[Worker] Error enviando a ${subDoc.id}:`, err.statusCode);
+              if (err.statusCode === 410 || err.statusCode === 404) {
+                console.log(`[Worker] Borrando suscripción obsoleta ${subDoc.id}`);
+                subDoc.ref.delete().catch(() => {});
+              }
+            });
         }
       }
     } catch (error) {
-      console.error("[Worker] Error en el ciclo de revisión:", error);
+      console.error("[Worker] Error CRÍTICO en el ciclo de revisión:", error);
     }
   };
 
