@@ -7,6 +7,8 @@ import dotenv from "dotenv";
 import webpush from "web-push";
 import { initializeApp, getApps, getApp, applicationDefault } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { initializeApp as initializeClientApp } from 'firebase/app';
+import { getFirestore as getClientFirestore, collection, getDocs, query, where, doc, deleteDoc } from 'firebase/firestore';
 import fs from "fs";
 
 dotenv.config();
@@ -17,21 +19,33 @@ const __dirname = path.dirname(__filename);
 // Firebase Admin Setup for Server
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
 
+// Forzamos el proyecto correcto en el entorno para evitar que use el proyecto de cómputo por defecto
+process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
+if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
+  process.env.FIREBASE_DATABASE_ID = firebaseConfig.firestoreDatabaseId;
+}
+
+let app;
 if (getApps().length === 0) {
-  initializeApp({
-    credential: applicationDefault(),
+  app = initializeApp({
     projectId: firebaseConfig.projectId
   });
+} else {
+  app = getApp();
 }
 
 const databaseId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)")
   ? firebaseConfig.firestoreDatabaseId
   : undefined;
 
-console.log(`[Firebase Admin] Nodo: ${process.version}, Config Project: ${firebaseConfig.projectId}, DB ID: ${databaseId || '(default)'}`);
+console.log(`[Firebase Admin] Project: ${firebaseConfig.projectId}, DB: ${databaseId || '(default)'}`);
 
-// @ts-ignore - Usamos getFirestore con databaseId opcional
-const db = databaseId ? getFirestore(databaseId) : getFirestore();
+// @ts-ignore
+const db = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+
+// Client SDK para el worker (bypass de permisos admin en AI Studio)
+const clientApp = initializeClientApp(firebaseConfig);
+const clientDb = getClientFirestore(clientApp, databaseId);
 
 // Web Push Setup
 // Generamos o usamos las llaves VAPID (Las que generé antes)
@@ -47,28 +61,28 @@ webpush.setVapidDetails(
 );
 
 async function startServer() {
-  const app = express();
+  const expApp = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: "10mb" }));
+  expApp.use(express.json({ limit: "10mb" }));
 
   // --- API Routes ---
 
-  app.get("/api/health", async (req, res) => {
+  expApp.get("/api/health", async (req, res) => {
     const results: any = {};
     try {
-      const dbDefault = getFirestore();
+      const dbDefault = getFirestore(app);
       const snapDefault = await dbDefault.collection("users").limit(1).get();
       results.defaultDB = { 
         status: "ok", 
         size: snapDefault.size,
-        projectId: getApp().options.projectId 
+        projectId: app.options.projectId 
       };
     } catch (e) {
       results.defaultDB = { 
         status: "error", 
         message: e instanceof Error ? e.message : String(e),
-        projectId: getApp().options.projectId 
+        projectId: app.options.projectId 
       };
     }
 
@@ -82,12 +96,12 @@ async function startServer() {
     res.json(results);
   });
 
-  app.get("/api/ping", (req, res) => {
+  expApp.get("/api/ping", (req, res) => {
     res.json({ pong: true, time: new Date().toISOString() });
   });
 
   // Nueva ruta para guardar suscripciones de push
-  app.post("/api/subscribe", async (req, res) => {
+  expApp.post("/api/subscribe", async (req, res) => {
     const { subscription, userId: uid, timezoneOffset } = req.body;
     if (!subscription || !uid) {
       return res.status(400).json({ error: "Faltan datos de suscripción o usuario." });
@@ -111,7 +125,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/analyze-prescription", async (req, res) => {
+  expApp.post("/api/analyze-prescription", async (req, res) => {
     const { image } = req.body;
     const apiKey = process.env.GEMINI_API_KEY;
 
@@ -124,22 +138,22 @@ async function startServer() {
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      const model = "gemini-3-flash-preview"; 
+      const genAI = new GoogleGenAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
       const prompt = "Analiza esta receta médica y extrae una lista de medicamentos. Para cada medicamento, identifica el nombre comercial o genérico, la dosis (ej. 500mg), la frecuencia (ej. cada 8 horas) y la duración del tratamiento. Devuelve los resultados estrictamente en formato JSON según el esquema proporcionado.";
 
-      const response = await ai.models.generateContent({
-        model,
+      const result = await model.generateContent({
         contents: [
           {
+            role: "user",
             parts: [
               { text: prompt },
               { inlineData: { mimeType: "image/jpeg", data: image.split(',')[1] } }
             ]
           }
         ],
-        config: {
+        generationConfig: {
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
@@ -157,7 +171,7 @@ async function startServer() {
         }
       });
 
-      const responseText = response.text;
+      const responseText = result.response.text();
       if (!responseText) {
         throw new Error("No se pudo obtener una respuesta legible de la IA.");
       }
@@ -184,11 +198,11 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: "spa",
     });
-    app.use(vite.middlewares);
+    expApp.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     // Servimos los archivos estáticos primero
-    app.use(express.static(distPath, {
+    expApp.use(express.static(distPath, {
       setHeaders: (res, filePath) => {
         if (filePath.endsWith('.css')) {
           res.setHeader('Content-Type', 'text/css');
@@ -197,7 +211,7 @@ async function startServer() {
     }));
     
     // SPA fallback: Para cualquier otra ruta que no sea un archivo, enviamos el index.html
-    app.get('*', (req, res) => {
+    expApp.get('*', (req, res) => {
       // Si piden un archivo que no existe (.css, .js, .png), no enviamos el index.html
       if (req.path.includes('.') && !req.path.endsWith('.html')) {
         return res.status(404).send('Archivo no encontrado');
@@ -206,26 +220,33 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  expApp.listen(PORT, "0.0.0.0", () => {
     console.log(`Servidor seguro corriendo en http://localhost:${PORT}`);
   });
 
   // --- Background Worker ---
   let lastCheckedTime = "";
 
-  const checkRemindersAndPush = async () => {
-    const nowUtc = new Date();
-    const minuteKey = nowUtc.toISOString().slice(0, 16); // YYYY-MM-DDTHH:mm
-    
-    if (minuteKey === lastCheckedTime) return;
-    lastCheckedTime = minuteKey;
-
-    console.log(`[Worker] Iniciando ciclo de revisión: ${nowUtc.toISOString()}`);
-
+    const checkRemindersAndPush = async () => {
     try {
-      console.log(`[Worker] Consultando suscripciones en DB: ${databaseId || 'default'}...`);
-      // 1. Obtenemos todas las suscripciones activas
-      const subSnapshot = await db.collection("push_subscriptions").get();
+      const nowUtc = new Date();
+      const minuteKey = nowUtc.toISOString().slice(0, 16); 
+      
+      if (minuteKey === lastCheckedTime) return;
+      lastCheckedTime = minuteKey;
+
+      console.log(`[Worker] Ciclo: ${nowUtc.toISOString()}. Project: ${clientApp.options.projectId}, DB: ${databaseId || '(default)'}`);
+
+      let subSnapshot;
+      try {
+        const subsCol = collection(clientDb, "push_subscriptions");
+        subSnapshot = await getDocs(subsCol);
+      } catch (e: any) {
+        console.error("[Worker] Error consultando subscripciones (Client SDK):", e.code, e.message);
+        // Si falla el cliente, el admin probablemente también, pero informamos
+        return;
+      }
+
       if (subSnapshot.empty) {
         console.log("[Worker] No hay suscripciones registradas.");
         return;
@@ -258,15 +279,16 @@ async function startServer() {
         console.log(`[Worker] Revisando recordatorios para usuario ${uid} en su hora local ${dateStr} ${timeStr}`);
 
         // 2. Buscar recordatorios para este usuario en su hora local
-        const remindersSnapshot = await db.collection('reminders')
-          .where('uid', '==', uid)
-          .where('date', '==', dateStr)
-          .where('time', '==', timeStr)
-          .where('completed', '==', false)
-          .get();
+        const remindersCol = collection(clientDb, 'reminders');
+        const q = query(remindersCol, 
+          where('uid', '==', uid),
+          where('date', '==', dateStr),
+          where('time', '==', timeStr),
+          where('completed', '==', false)
+        );
+        const remindersSnapshot = await getDocs(q);
 
         if (remindersSnapshot.empty) {
-          // console.log(`[Worker] No hay recordatorios para ${uid} a las ${timeStr}`);
           continue;
         }
 
@@ -288,7 +310,7 @@ async function startServer() {
               console.error(`[Worker] Error enviando a ${subDoc.id}:`, err.statusCode);
               if (err.statusCode === 410 || err.statusCode === 404) {
                 console.log(`[Worker] Borrando suscripción obsoleta ${subDoc.id}`);
-                subDoc.ref.delete().catch(() => {});
+                deleteDoc(subDoc.ref).catch(() => {});
               }
             });
         }

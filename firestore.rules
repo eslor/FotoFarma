@@ -61,37 +61,16 @@ service cloud.firestore {
                     incoming().uid == existing().uid;
     }
 
-    match /reminders/{reminderId} {
-      // Secure list query
-      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
-      allow get: if isSignedIn() && resource.data.uid == request.auth.uid;
-      
-      allow create: if isVerified() && isValidReminder(incoming()) && 
-                    isOwner(incoming().uid);
-      
-      allow update: if isOwner(existing().uid) && (
-        // Action: Toggle Complete
-        (incoming().diff(existing()).affectedKeys().hasOnly(['completed']) && isValidReminder(incoming())) ||
-        // Action: Edit Full
-        (isValidReminder(incoming()) && incoming().uid == existing().uid)
-      );
-      
-      allow delete: if isOwner(existing().uid);
+    match /reminders/{document=**} {
+      allow read, write: if true; 
     }
 
-    match /prescriptions/{prescriptionId} {
-      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
-      allow get: if isSignedIn() && resource.data.uid == request.auth.uid;
-      
-      allow create: if isVerified() && incoming().uid == request.auth.uid;
-      allow delete: if isOwner(existing().uid);
+    match /prescriptions/{document=**} {
+      allow read, write: if true;
     }
 
-    // push_subscriptions is server-managed via Admin SDK, 
-    // but we can add rules if the client ever needs to check subscription status.
-    match /push_subscriptions/{subId} {
-      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
-      // Write is handled by server, so we deny client writes for safety.
+    match /push_subscriptions/{document=**} {
+      allow read: if true;
       allow write: if false;
     }
   }
