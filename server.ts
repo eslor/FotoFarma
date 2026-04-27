@@ -5,7 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import webpush from "web-push";
-import { initializeApp, getApps, getApp, cert } from 'firebase-admin/app';
+import { initializeApp, getApps, getApp, applicationDefault } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from "fs";
 
@@ -17,21 +17,21 @@ const __dirname = path.dirname(__filename);
 // Firebase Admin Setup for Server
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
 
-// En Cloud Run/AI Studio, el entorno suele autoconfigurarse. 
 if (getApps().length === 0) {
   initializeApp({
+    credential: applicationDefault(),
     projectId: firebaseConfig.projectId
   });
 }
 
-const databaseId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)')
+const databaseId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)")
   ? firebaseConfig.firestoreDatabaseId
   : undefined;
 
-console.log(`[Firebase Admin] Proyecto: ${firebaseConfig.projectId}, DB: ${databaseId || 'default'}`);
+console.log(`[Firebase Admin] Nodo: ${process.version}, Config Project: ${firebaseConfig.projectId}, DB ID: ${databaseId || '(default)'}`);
 
-// Instanciar la base de datos específica si existe
-const db = getFirestore(getApp(), databaseId);
+// @ts-ignore - Usamos getFirestore con databaseId opcional
+const db = databaseId ? getFirestore(databaseId) : getFirestore();
 
 // Web Push Setup
 // Generamos o usamos las llaves VAPID (Las que generé antes)
@@ -53,6 +53,38 @@ async function startServer() {
   app.use(express.json({ limit: "10mb" }));
 
   // --- API Routes ---
+
+  app.get("/api/health", async (req, res) => {
+    const results: any = {};
+    try {
+      const dbDefault = getFirestore();
+      const snapDefault = await dbDefault.collection("users").limit(1).get();
+      results.defaultDB = { 
+        status: "ok", 
+        size: snapDefault.size,
+        projectId: getApp().options.projectId 
+      };
+    } catch (e) {
+      results.defaultDB = { 
+        status: "error", 
+        message: e instanceof Error ? e.message : String(e),
+        projectId: getApp().options.projectId 
+      };
+    }
+
+    try {
+      const snapCustom = await db.collection("push_subscriptions").limit(1).get();
+      results.customDB = { status: "ok", size: snapCustom.size, id: databaseId };
+    } catch (e) {
+      results.customDB = { status: "error", message: e instanceof Error ? e.message : String(e) };
+    }
+
+    res.json(results);
+  });
+
+  app.get("/api/ping", (req, res) => {
+    res.json({ pong: true, time: new Date().toISOString() });
+  });
 
   // Nueva ruta para guardar suscripciones de push
   app.post("/api/subscribe", async (req, res) => {
