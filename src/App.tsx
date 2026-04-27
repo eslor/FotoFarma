@@ -174,6 +174,48 @@ interface DashboardProps {
   reminders: Medication[];
 }
 
+const AlarmOverlay = ({ med, onConfirm, onStop }: { med: Medication, onConfirm: () => void, onStop: () => void }) => {
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] bg-emerald-600 flex flex-col items-center justify-center p-8 text-white text-center"
+    >
+      <motion.div 
+        animate={{ 
+          scale: [1, 1.1, 1],
+          rotate: [0, -5, 5, -5, 0]
+        }}
+        transition={{ repeat: Infinity, duration: 0.5 }}
+        className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center mb-8"
+      >
+        <Bell className="w-12 h-12 text-white" />
+      </motion.div>
+      
+      <h2 className="text-sm font-bold uppercase tracking-widest text-emerald-100 mb-2">¡Es Hora del Medicamento!</h2>
+      <h1 className="text-4xl font-black mb-4">{med.name}</h1>
+      <p className="text-xl text-emerald-50 mb-12">{med.dosage}</p>
+      
+      <div className="w-full space-y-4">
+        <button 
+          onClick={onConfirm}
+          className="w-full py-5 bg-white text-emerald-600 rounded-3xl font-black text-xl shadow-2xl flex items-center justify-center gap-3 active:scale-95 transition-transform"
+        >
+          <Check className="w-6 h-6" />
+          REGISTRAR TOMA
+        </button>
+        <button 
+          onClick={onStop}
+          className="w-full py-4 bg-emerald-700/50 text-white rounded-3xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
+        >
+           SALTAR / LUEGO
+        </button>
+      </div>
+    </motion.div>
+  );
+};
+
 const DashboardView = ({ setView, user, reminders }: DashboardProps) => {
   const completedToday = reminders.filter(r => r.completed).length;
   const totalToday = reminders.length;
@@ -260,6 +302,19 @@ const DashboardView = ({ setView, user, reminders }: DashboardProps) => {
           <div className="flex gap-4">
             <button 
               onClick={() => {
+                // Para la demo: activamos la alarma visual y sonora inmediatamente
+                const testMed: Medication = {
+                  id: 'demo-med',
+                  name: 'Medicina Demo',
+                  dosage: '1 pastilla de prueba',
+                  time: 'AHORA',
+                  date: '',
+                  completed: false
+                };
+                setActiveAlarm(testMed);
+                alarmSound.current?.play().catch(() => {});
+                
+                // También enviamos notificación push
                 const title = "¡Prueba de FotoFarma!";
                 const options = { 
                   body: "Así llegará el aviso de tu medicina 💊",
@@ -268,13 +323,11 @@ const DashboardView = ({ setView, user, reminders }: DashboardProps) => {
                 };
                 if ('serviceWorker' in navigator && Notification.permission === 'granted') {
                   navigator.serviceWorker.ready.then(reg => reg.showNotification(title, options));
-                } else if (Notification.permission === 'granted') {
-                  new Notification(title, options);
                 }
               }}
-              className="text-indigo-600 text-xs font-semibold"
+              className="text-indigo-600 text-xs font-semibold px-2 py-1 bg-indigo-50 rounded-lg"
             >
-              Probar aviso
+              Probar Alarma 🔔
             </button>
             <button onClick={() => setView('calendar')} className="text-emerald-600 text-sm font-semibold">Ver todo</button>
           </div>
@@ -1096,13 +1149,30 @@ export default function App() {
     }
   };
 
+  const [activeAlarm, setActiveAlarm] = useState<Medication | null>(null);
+  const notifiedIds = useRef<Set<string>>(new Set());
+  const alarmSound = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    // Inicializar sonido de alarma con un tono profesional
+    alarmSound.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    alarmSound.current.loop = true;
+  }, []);
+
+  const stopAlarm = () => {
+    if (alarmSound.current) {
+      alarmSound.current.pause();
+      alarmSound.current.currentTime = 0;
+    }
+    setActiveAlarm(null);
+  };
+
   // Notification Check Effect
   useEffect(() => {
     if (!user || notificationPermission !== 'granted') return;
 
     const checkReminders = async () => {
       const now = new Date();
-      // Format time as HH:MM matching our saved format
       const timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
       const dateStr = getLocalDateString(now);
 
@@ -1116,37 +1186,47 @@ export default function App() {
 
       try {
         const snapshot = await getDocs(q);
-        snapshot.forEach(async (doc) => {
-          const med = doc.data();
+        snapshot.forEach(async (docSnap) => {
+          if (notifiedIds.current.has(docSnap.id)) return;
+          
+          const med = docSnap.data() as Medication;
+          med.id = docSnap.id;
+          
+          notifiedIds.current.add(docSnap.id);
+          setActiveAlarm(med);
+          
+          // Sonar alarma (solo si el usuario interactuó antes con la web)
+          alarmSound.current?.play().catch(e => console.log("Audio bloqueado esperando interacción", e));
+
           const title = `¡Hora de tu medicina!`;
           const options = {
             body: `Es momento de tomar: ${med.name} (${med.dosage})`,
             icon: 'https://picsum.photos/seed/fotofarma/192/192',
             badge: 'https://picsum.photos/seed/fotofarma/192/192',
-            tag: `med-${doc.id}`, // Prevent duplicate notifications
-            renotify: true
+            tag: `med-${docSnap.id}`,
+            renotify: true,
+            requireInteraction: true
           };
 
-          // Try Service Worker first (more reliable for PWA)
           if ('serviceWorker' in navigator) {
             const registration = await navigator.serviceWorker.ready;
-            if (registration.showNotification) {
-              registration.showNotification(title, options);
-              return;
-            }
+            registration.showNotification(title, options);
+          } else {
+            new Notification(title, options);
           }
-          
-          // Fallback to standard Notification
-          new Notification(title, options);
         });
+
+        // Limpiar IDs antiguos de la lista de notificados después de 1 minuto
+        if (now.getSeconds() === 0) {
+          // Opcional: limpiar IDs que ya no están en el rango de tiempo actual
+        }
+
       } catch (err) {
         console.error("Error checking notifications:", err);
       }
     };
 
-    // Check immediately and then every minute
-    checkReminders();
-    const interval = setInterval(checkReminders, 60000); 
+    const interval = setInterval(checkReminders, 10000); // Revisar cada 10 segundos
     return () => clearInterval(interval);
   }, [user, notificationPermission]);
 
@@ -1164,6 +1244,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 selection:bg-emerald-100 selection:text-emerald-900">
+      <AnimatePresence>
+        {activeAlarm && (
+          <AlarmOverlay 
+            med={activeAlarm} 
+            onStop={() => stopAlarm()} 
+            onConfirm={() => {
+              toggleComplete(activeAlarm);
+              stopAlarm();
+            }} 
+          />
+        )}
+      </AnimatePresence>
+
       <AnimatePresence mode="wait">
         {view === 'login' && <Login key="login" />}
         {view === 'dashboard' && <DashboardView key="dashboard" setView={setView} user={user} reminders={remindersToday} />}
