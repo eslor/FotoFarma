@@ -15,16 +15,18 @@ const __dirname = path.dirname(__filename);
 
 // Firebase Admin Setup for Server
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
+
 admin.initializeApp({
   projectId: firebaseConfig.projectId
 });
-const db = admin.firestore();
-// Si hay un databaseId específico en la config, lo usamos
-if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
-  // En firebase-admin, se puede especificar el databaseId así:
-  // @ts-ignore
-  db.databaseId = firebaseConfig.firestoreDatabaseId;
-}
+
+// Importación dinámica para evitar conflictos
+const { getFirestore: getAdminFirestore } = await import('firebase-admin/firestore');
+
+// Inicialización correcta para bases de datos nombradas en Firebase Admin
+const db = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)')
+  ? getAdminFirestore(admin.app(), firebaseConfig.firestoreDatabaseId)
+  : getAdminFirestore(admin.app());
 
 // Web Push Setup
 // Generamos o usamos las llaves VAPID (Las que generé antes)

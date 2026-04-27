@@ -1290,6 +1290,25 @@ export default function App() {
 
   const toggleComplete = async (med: Medication) => {
     if (!med.id) return;
+
+    // No intentar actualizar en Firestore si es la medicina de demo
+    if (med.id === 'demo-med') {
+      const newReminders = remindersToday.map(r => 
+        r.id === 'demo-med' ? { ...r, completed: !r.completed } : r
+      );
+      setRemindersToday(newReminders);
+      
+      if (!med.completed) {
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#10b981', '#34d399', '#6ee7b7']
+        });
+      }
+      return;
+    }
+
     try {
       await updateDoc(doc(db, 'reminders', med.id), {
         completed: !med.completed
