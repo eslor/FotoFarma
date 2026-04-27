@@ -10,8 +10,8 @@ self.addEventListener('push', (event) => {
   const data = event.data.json();
   const options = {
     body: data.body,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: data.icon || 'https://picsum.photos/seed/fotofarma/192/192',
+    badge: data.icon || 'https://picsum.photos/seed/fotofarma/192/192',
     vibrate: [100, 50, 100],
     data: {
       dateOfArrival: Date.now(),

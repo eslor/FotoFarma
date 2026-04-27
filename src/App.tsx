@@ -1113,7 +1113,6 @@ export default function App() {
     }
     
     try {
-      // Handle both Promise-based and callback-based browsers
       const permission = await new Promise<NotificationPermission>((resolve) => {
         const result = Notification.requestPermission(resolve);
         if (result) {
@@ -1130,12 +1129,53 @@ export default function App() {
           body: "Te avisaremos cuando sea hora de tu medicina.",
           icon: 'https://picsum.photos/seed/fotofarma/192/192'
         });
+        
+        // Iniciamos suscripción persistente al servidor
+        if (user) {
+          subscribeUserToPush(user.uid);
+        }
       }
     } catch (err) {
       console.error("Error requesting notifications:", err);
-      alert("Hubo un error al activar las notificaciones. Si estás en iPhone, recuerda añadir la aplicación a la pantalla de inicio primero.");
     }
   };
+
+  const subscribeUserToPush = async (userId: string) => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      
+      // Suscribirse al Push Manager
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array("BMSBMHIHH8YkhmEbHrAZGb2N4kQfVSoQ4XemexmJaT7tDVq_Ft7y1TQ2UkiQWQW2mSTfZWCm6ctsNYRUQqVc8js")
+      });
+
+      // Enviar la suscripción a nuestro servidor
+      await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription, userId })
+      });
+
+      console.log("Suscripción Push exitosa");
+    } catch (err) {
+      console.error("Fallo al suscribir a push:", err);
+    }
+  };
+
+  // Helper para convertir la llave VAPID
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
 
   const [installPrompt, setInstallPrompt] = useState<any>(null);
 
