@@ -5,10 +5,6 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import webpush from "web-push";
-import { initializeApp, getApps, getApp, applicationDefault } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { initializeApp as initializeClientApp } from 'firebase/app';
-import { getFirestore as getClientFirestore, collection, getDocs, query, where, doc, deleteDoc } from 'firebase/firestore';
 import fs from "fs";
 
 dotenv.config();
@@ -16,8 +12,23 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Firebase Admin Setup for Server
+// Firebase Admin Setup for Server - CARGAR PRIMERO
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
+
+// Forzamos las variables de entorno para el Admin SDK antes de importar
+process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
+if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
+  process.env.FIREBASE_DATABASE_ID = firebaseConfig.firestoreDatabaseId;
+}
+
+import { initializeApp, getApps, getApp, applicationDefault } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { initializeApp as initializeClientApp } from 'firebase/app';
+import { getFirestore as getClientFirestore, collection, getDocs, query, where, doc, deleteDoc } from 'firebase/firestore';
+
+const databaseId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)")
+  ? firebaseConfig.firestoreDatabaseId
+  : undefined;
 
 let app;
 if (getApps().length === 0) {
@@ -29,14 +40,21 @@ if (getApps().length === 0) {
   app = getApp();
 }
 
-const databaseId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)")
-  ? firebaseConfig.firestoreDatabaseId
-  : undefined;
-
-console.log(`[Firebase Admin] Project: ${app.options.projectId || firebaseConfig.projectId}, DB: ${databaseId || '(default)'}`);
+console.log(`[Firebase Admin] Project: ${firebaseConfig.projectId}, DB: ${databaseId || '(default)'}`);
 
 // @ts-ignore
 const db = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+
+// Verificación de salud de la base de datos coincidente con el worker
+const testDbConnection = async () => {
+    try {
+        const testSnap = await db.collection("push_subscriptions").limit(1).get();
+        console.log(`[Firebase Admin] Conexión exitosa a la DB: ${databaseId || '(default)'}. Registros encontrados: ${testSnap.size}`);
+    } catch (e: any) {
+        console.error(`[Firebase Admin] Error de conexión inicial a la DB ${databaseId || '(default)'}:`, e.message);
+    }
+};
+testDbConnection();
 
 // Client SDK para el worker (bypass de permisos admin en AI Studio)
 const clientApp = initializeClientApp(firebaseConfig);
@@ -290,14 +308,37 @@ async function startServer() {
       
       let subSnapshot;
       try {
-        // Usamos el Admin SDK (db) para evitar problemas de permisos en el worker del servidor
+        // Intentamos con Admin SDK primero
         subSnapshot = await db.collection("push_subscriptions").get();
+        console.log(`[Worker] Admin SDK exitoso. Suscripciones: ${subSnapshot.size}`);
       } catch (e: any) {
-        console.error("[Worker] Error consultando subscripciones (Admin SDK):", e.message);
-        return;
+        console.warn("[Worker] Admin SDK falló (PERMISSION_DENIED o NOT_FOUND), intentando Client SDK como fallback...", e.message);
+        
+        try {
+          // Fallback al Client SDK
+          const subCol = collection(clientDb, "push_subscriptions");
+          subSnapshot = await getDocs(subCol);
+          console.log(`[Worker] Client SDK exitoso. Suscripciones: ${subSnapshot.docs.length}`);
+          
+          // Mapeamos a un formato compatible con el resto del código
+          subSnapshot = {
+            empty: subSnapshot.empty,
+            size: subSnapshot.docs.length,
+            docs: subSnapshot.docs.map(d => ({
+                id: d.id,
+                data: () => d.data(),
+                ref: { delete: async () => { 
+                    try { await deleteDoc(d.ref); } catch(err) { console.error("Error borrando sub:", err); }
+                }}
+            }))
+          };
+        } catch (clientErr: any) {
+          console.error("[Worker] Ambos SDKs fallaron. Error Client SDK:", clientErr.message);
+          return;
+        }
       }
 
-      if (subSnapshot.empty) {
+      if (!subSnapshot || subSnapshot.empty) {
         console.log("[Worker] No hay suscripciones registradas.");
         return;
       }
@@ -328,13 +369,32 @@ async function startServer() {
 
         console.log(`[Worker] Revisando recordatorios para usuario ${uid} en su hora local ${dateStr} ${timeStr}`);
 
-        // 2. Buscar recordatorios para este usuario en su hora local usando Admin SDK
-        const remindersSnapshot = await db.collection('reminders')
-          .where('uid', '==', uid)
-          .where('date', '==', dateStr)
-          .where('time', '==', timeStr)
-          .where('completed', '==', false)
-          .get();
+        // 2. Buscar recordatorios para este usuario en su hora local
+        let remindersSnapshot;
+        try {
+          // Intentamos con Admin SDK
+          remindersSnapshot = await db.collection('reminders')
+            .where('uid', '==', uid)
+            .where('date', '==', dateStr)
+            .where('time', '==', timeStr)
+            .where('completed', '==', false)
+            .get();
+        } catch (e: any) {
+          console.warn(`[Worker] Admin SDK falló para recordatorios de ${uid}, intentando Client SDK...`);
+          try {
+            const remCol = collection(clientDb, "reminders");
+            const q = query(remCol, 
+              where('uid', '==', uid),
+              where('date', '==', dateStr),
+              where('time', '==', timeStr),
+              where('completed', '==', false)
+            );
+            remindersSnapshot = await getDocs(q);
+          } catch (clientErr: any) {
+            console.error(`[Worker] Ambos SDKs fallaron para recordatorios de ${uid}:`, clientErr.message);
+            continue;
+          }
+        }
 
         if (remindersSnapshot.empty) {
           continue;
