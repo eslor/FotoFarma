@@ -457,7 +457,6 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message }: {
 
 interface LoginProps {
   onAcceptTerms: () => void;
-  key?: string;
 }
 
 const Login = ({ onAcceptTerms }: LoginProps) => {
@@ -466,7 +465,10 @@ const Login = ({ onAcceptTerms }: LoginProps) => {
     try {
       await signInWithPopup(auth, googleProvider);
       onAcceptTerms();
-    } catch (error) {
+    } catch (error: any) {
+      if (error.code === 'auth/popup-closed-by-user') {
+        return;
+      }
       console.error("Login error:", error);
     }
   };
@@ -1661,7 +1663,7 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence mode="wait">
-        {view === 'login' && <Login key="login" onAcceptTerms={() => {}} />}
+        {view === 'login' && <Login onAcceptTerms={() => {}} />}
         {view === 'dashboard' && (
           <DashboardView 
             key="dashboard" 

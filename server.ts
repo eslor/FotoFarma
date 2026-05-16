@@ -19,16 +19,11 @@ const __dirname = path.dirname(__filename);
 // Firebase Admin Setup for Server
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
 
-// Forzamos el proyecto correcto en el entorno para evitar que use el proyecto de cómputo por defecto
-process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
-if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
-  process.env.FIREBASE_DATABASE_ID = firebaseConfig.firestoreDatabaseId;
-}
-
 let app;
 if (getApps().length === 0) {
   app = initializeApp({
-    projectId: firebaseConfig.projectId
+    projectId: firebaseConfig.projectId,
+    credential: applicationDefault()
   });
 } else {
   app = getApp();
@@ -38,7 +33,7 @@ const databaseId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firesto
   ? firebaseConfig.firestoreDatabaseId
   : undefined;
 
-console.log(`[Firebase Admin] Project: ${firebaseConfig.projectId}, DB: ${databaseId || '(default)'}`);
+console.log(`[Firebase Admin] Project: ${app.options.projectId || firebaseConfig.projectId}, DB: ${databaseId || '(default)'}`);
 
 // @ts-ignore
 const db = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
