@@ -43,13 +43,25 @@ service cloud.firestore {
 
     function isValidReminder(data) {
       return data.keys().hasAll(['uid', 'name', 'time', 'date']) &&
-             data.keys().size() >= 4 && data.keys().size() <= 10 &&
+             data.keys().size() >= 4 && data.keys().size() <= 15 &&
              data.uid is string && data.uid.size() <= 128 &&
              data.name is string && data.name.size() <= 200 &&
-             data.time is string && data.time.matches('^\\d{2}:\\d{2}$') &&
-             data.date is string && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+             data.time is string && (data.time == 'AHORA' || data.time.matches('^\\d{2}:\\d{2}$')) &&
+             data.date is string && (data.date == '' || data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')) &&
              (!('dosage' in data) || (data.dosage is string && data.dosage.size() <= 200)) &&
+             (!('frequency' in data) || (data.frequency is string && data.frequency.size() <= 200)) &&
+             (!('duration' in data) || (data.duration is string && data.duration.size() <= 200)) &&
+             (!('comments' in data) || (data.comments is string && data.comments.size() <= 1000)) &&
+             (!('endDate' in data) || (data.endDate is string && data.endDate.matches('^\\d{4}-\\d{2}-\\d{2}$'))) &&
+             (!('prescriptionId' in data) || (data.prescriptionId is string && data.prescriptionId.size() <= 128)) &&
              (!('completed' in data) || data.completed is bool);
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['uid', 'dayStartTime', 'acceptedTerms']) &&
+             data.uid == request.auth.uid &&
+             data.dayStartTime is string && data.dayStartTime.matches('^\\d{2}:\\d{2}$') &&
+             data.acceptedTerms is bool;
     }
 
     // --- Collection Rules ---
@@ -61,17 +73,31 @@ service cloud.firestore {
                     incoming().uid == existing().uid;
     }
 
-    match /reminders/{document=**} {
-      allow read, write: if true; 
+    match /reminders/{reminderId} {
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow get: if isOwner(existing().uid);
+      allow create: if isOwner(incoming().uid) && isValidReminder(incoming());
+      allow update: if isOwner(existing().uid) && isValidReminder(incoming()) &&
+                    incoming().uid == existing().uid;
+      allow delete: if isOwner(existing().uid);
     }
 
-    match /prescriptions/{document=**} {
-      allow read, write: if true;
+    match /prescriptions/{prescriptionId} {
+      allow read: if isOwner(existing().uid);
+      allow create: if isOwner(incoming().uid);
+      allow update: if isOwner(existing().uid) && incoming().uid == existing().uid;
+      allow delete: if isOwner(existing().uid);
     }
 
-    match /push_subscriptions/{document=**} {
-      allow read: if true;
-      allow write: if false;
+    match /user_settings/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && isValidSettings(incoming());
+    }
+
+    match /push_subscriptions/{subId} {
+      allow read: if isOwner(existing().uid);
+      allow create: if isOwner(incoming().uid);
+      allow delete: if isOwner(existing().uid);
     }
   }
 }

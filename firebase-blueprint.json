@@ -46,10 +46,24 @@
         "dosage": { "type": "string" },
         "time": { "type": "string" },
         "date": { "type": "string" },
+        "endDate": { "type": "string" },
+        "comments": { "type": "string" },
         "completed": { "type": "boolean" },
         "prescriptionId": { "type": "string" }
       },
       "required": ["uid", "name", "time", "date"]
+    },
+    "UserSettings": {
+      "title": "User Settings",
+      "description": "User preferences and profile data.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "dayStartTime": { "type": "string", "description": "HH:mm format for when the user starts their day" },
+        "acceptedTerms": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid"]
     },
     "PushSubscription": {
       "title": "Push Subscription",
@@ -79,6 +93,10 @@
     "/push_subscriptions/{subId}": {
       "schema": "PushSubscription",
       "description": "Push notification subscriptions"
+    },
+    "/user_settings/{userId}": {
+      "schema": "UserSettings",
+      "description": "User preferences and settings"
     }
   }
 }

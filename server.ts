@@ -141,7 +141,7 @@ async function startServer() {
       const client = new GoogleGenAI({ apiKey });
       const model = "gemini-3-flash-preview"; 
 
-      const prompt = "Analiza esta receta médica y extrae una lista de medicamentos. Para cada medicamento, identifica el nombre comercial o genérico, la dosis (ej. 500mg), la frecuencia (ej. cada 8 horas) y la duración del tratamiento. Devuelve los resultados estrictamente en formato JSON según el esquema proporcionado.";
+      const prompt = "Analiza esta receta médica y extrae una lista de medicamentos. Para cada medicamento, identifica el nombre comercial o genérico, la dosis (ej. 500mg), la frecuencia (ej. cada 8 horas), la duración del tratamiento (ej. 7 días, o 'indefinido') y cualquier comentario o nota adicional del médico (ej. 'tomar después de comer'). Devuelve los resultados estrictamente en formato JSON según el esquema proporcionado.";
 
       const response = await client.models.generateContent({
         model,
@@ -164,7 +164,8 @@ async function startServer() {
                 name: { type: Type.STRING },
                 dosage: { type: Type.STRING },
                 frequency: { type: Type.STRING },
-                duration: { type: Type.STRING }
+                duration: { type: Type.STRING },
+                comments: { type: Type.STRING }
               },
               required: ["name", "dosage", "frequency"]
             }

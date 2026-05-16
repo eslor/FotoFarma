@@ -41,6 +41,7 @@ import {
   where, 
   serverTimestamp, 
   doc, 
+  setDoc,
   updateDoc, 
   deleteDoc,
   orderBy,
@@ -55,10 +56,21 @@ interface Medication {
   id?: string;
   name: string;
   dosage: string;
+  frequency: string;
+  duration?: string;
+  comments?: string;
   time: string;
   date: string;
+  endDate?: string;
   completed: boolean;
   uid?: string;
+  prescriptionId?: string;
+}
+
+interface UserSettings {
+  uid: string;
+  dayStartTime: string;
+  acceptedTerms: boolean;
 }
 
 interface Prescription {
@@ -121,10 +133,15 @@ const getLocalDateString = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-const parseFrequency = (frequency: string): string[] => {
+const parseFrequency = (frequency: string, dayStartTime: string = '08:00'): string[] => {
   const freq = frequency.toLowerCase();
+  const [startH, startM] = dayStartTime.split(':').map(Number);
   
-  // 0. Detección de Dosis Única (Prioridad máxima)
+  const formatTime = (h: number, m: number) => {
+    return `${String(h % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
+
+  // 0. Detección de Dosis Única
   if (
     freq.includes('única') || 
     freq.includes('unica') || 
@@ -132,10 +149,10 @@ const parseFrequency = (frequency: string): string[] => {
     freq.includes('ahora') ||
     freq.includes('momento')
   ) {
-    return ['09:00']; // Solo una vez, la lógica de guardado se encargará de no repetirlo
+    return [dayStartTime];
   }
 
-  // 1. Detecciones de 24 horas / 1 vez al día (Prioridad alta para evitar sobredosis)
+  // 1. Detecciones de 24 horas / 1 vez al día
   if (
     freq.includes('24 horas') || 
     freq.includes('24h') || 
@@ -145,7 +162,7 @@ const parseFrequency = (frequency: string): string[] => {
     freq.includes('cada día') || 
     freq.includes('cada dia')
   ) {
-    return ['08:00'];
+    return [dayStartTime];
   }
 
   // 2. Detecciones de 12 horas / 2 veces al día
@@ -156,7 +173,7 @@ const parseFrequency = (frequency: string): string[] => {
     freq.includes('dos veces') ||
     freq.includes('cada mañana y noche')
   ) {
-    return ['08:00', '20:00'];
+    return [dayStartTime, formatTime(startH + 12, startM)];
   }
 
   // 3. Detecciones de 8 horas / 3 veces al día
@@ -166,7 +183,7 @@ const parseFrequency = (frequency: string): string[] => {
     freq.includes('3 veces') || 
     freq.includes('tres veces')
   ) {
-    return ['08:00', '16:00', '00:00'];
+    return [dayStartTime, formatTime(startH + 8, startM), formatTime(startH + 16, startM)];
   }
 
   // 4. Detecciones de 6 horas / 4 veces al día
@@ -176,7 +193,12 @@ const parseFrequency = (frequency: string): string[] => {
     freq.includes('4 veces') || 
     freq.includes('cuatro veces')
   ) {
-    return ['06:00', '12:00', '18:00', '00:00'];
+    return [
+      dayStartTime, 
+      formatTime(startH + 6, startM), 
+      formatTime(startH + 12, startM), 
+      formatTime(startH + 18, startM)
+    ];
   }
 
   // 5. Detecciones de 4 horas / 6 veces al día
@@ -186,11 +208,17 @@ const parseFrequency = (frequency: string): string[] => {
     freq.includes('6 veces') || 
     freq.includes('seis veces')
   ) {
-    return ['04:00', '08:00', '12:00', '16:00', '20:00', '00:00'];
+    return [
+      dayStartTime, 
+      formatTime(startH + 4, startM), 
+      formatTime(startH + 8, startM), 
+      formatTime(startH + 12, startM), 
+      formatTime(startH + 16, startM), 
+      formatTime(startH + 20, startM)
+    ];
   }
 
-  // Si no coincide nada, por seguridad ponemos solo una vez al día (mejor pecar de poco que de mucho)
-  return ['09:00'];
+  return [dayStartTime];
 };
 
 // --- Components ---
@@ -200,6 +228,7 @@ interface DashboardProps {
   user: any;
   reminders: Medication[];
   onTestAlarm: () => void;
+  onOpenSettings: () => void;
   installPrompt: any;
   onInstall: () => void;
   key?: string;
@@ -247,7 +276,7 @@ const AlarmOverlay = ({ med, onConfirm, onStop }: { med: Medication, onConfirm: 
   );
 };
 
-const DashboardView = ({ setView, user, reminders, onTestAlarm, installPrompt, onInstall }: DashboardProps) => {
+const DashboardView = ({ setView, user, reminders, onTestAlarm, onOpenSettings, installPrompt, onInstall }: DashboardProps) => {
   const completedToday = reminders.filter(r => r.completed).length;
   const totalToday = reminders.length;
   const progress = totalToday > 0 ? Math.round((completedToday / totalToday) * 100) : 0;
@@ -264,9 +293,18 @@ const DashboardView = ({ setView, user, reminders, onTestAlarm, installPrompt, o
           <p className="text-zinc-500 text-sm font-medium">Hola, {user?.displayName?.split(' ')[0] || 'Usuario'}</p>
           <h1 className="text-2xl font-bold text-zinc-900">Tu Salud Hoy</h1>
         </div>
-        <button onClick={() => signOut(auth)} className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-zinc-400 border border-zinc-100">
-          <LogOut className="w-5 h-5" />
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={onOpenSettings}
+            className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-zinc-400 border border-zinc-100"
+            title="Ajustes de Horario"
+          >
+            <Bell className="w-5 h-5" />
+          </button>
+          <button onClick={() => signOut(auth)} className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-zinc-400 border border-zinc-100">
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
       </header>
 
       {/* PWA Install Banner */}
@@ -417,10 +455,17 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message }: {
   );
 };
 
-const Login = () => {
+interface LoginProps {
+  onAcceptTerms: () => void;
+  key?: string;
+}
+
+const Login = ({ onAcceptTerms }: LoginProps) => {
+  const [showTerms, setShowTerms] = useState(false);
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
+      onAcceptTerms();
     } catch (error) {
       console.error("Login error:", error);
     }
@@ -452,6 +497,18 @@ const Login = () => {
         </motion.div>
 
         <div className="space-y-4">
+          <div className="p-4 bg-zinc-800/50 rounded-2xl border border-zinc-700/50 mb-4 text-left">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-amber-500 mt-1 flex-shrink-0" />
+              <div>
+                <p className="text-[11px] font-bold text-zinc-300 uppercase mb-1">Aviso Legal e IA</p>
+                <p className="text-[10px] text-zinc-400 leading-relaxed">
+                  Esta aplicación utiliza Inteligencia Artificial para el análisis de recetas. <b>La IA puede cometer errores.</b> Esta herramienta NO reemplaza el consejo médico profesional. Siempre verifique los horarios y dosis con su médico o farmacéutico antes de ingerir cualquier medicamento.
+                </p>
+              </div>
+            </div>
+          </div>
+
           <button 
             onClick={handleLogin}
             className="w-full py-5 bg-white text-zinc-900 font-bold rounded-2xl flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-xl"
@@ -460,7 +517,7 @@ const Login = () => {
             Empezar ahora
             <ArrowRight className="w-5 h-5 ml-2" />
           </button>
-          <p className="text-zinc-500 text-xs">Acceso seguro con Google Health Connect</p>
+          <p className="text-zinc-500 text-[10px] px-4">Al entrar, aceptas que esta es una herramienta de apoyo y entiendes las limitaciones de la IA.</p>
         </div>
       </div>
     </motion.div>
@@ -723,6 +780,18 @@ const CalendarView = ({ setView, requestPermission, notificationPermission, togg
                   />
                 </div>
                 <p className="text-xs text-zinc-500 truncate">{med.dosage}</p>
+                {med.comments && (
+                  <div className="mt-1 flex items-start gap-1 p-2 bg-indigo-50/50 rounded-xl border border-indigo-100/50">
+                    <Info className="w-3 h-3 text-indigo-500 mt-0.5 flex-shrink-0" />
+                    <p className="text-[10px] text-indigo-700 leading-tight italic">{med.comments}</p>
+                  </div>
+                )}
+                {med.endDate && (
+                  <div className="mt-1 flex items-center gap-1">
+                    <CalendarIcon className="w-3 h-3 text-zinc-300" />
+                    <p className="text-[10px] text-zinc-400 font-medium">Hasta el {med.endDate}</p>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button 
@@ -849,10 +918,11 @@ const GalleryView = ({ setView }: GalleryViewProps) => {
 interface PreviewViewProps {
   setView: (v: View) => void;
   capturedImage: string;
+  userSettings: UserSettings | null;
   key?: string;
 }
 
-const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
+const PreviewView = ({ setView, capturedImage, userSettings }: PreviewViewProps) => {
   const [isProcessing, setIsProcessing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
@@ -875,7 +945,7 @@ const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
 
         const enhancedResults = meds.map((m: any) => ({
           ...m,
-          times: parseFrequency(m.frequency)
+          times: parseFrequency(m.frequency, userSettings?.dayStartTime)
         }));
         setResults(enhancedResults);
         setIsProcessing(false);
@@ -919,14 +989,26 @@ const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
         medications: results
       });
 
-      // Generate reminders (simplified logic: 7 days)
+      // Generate reminders
       const today = new Date();
-      for (let i = 0; i < 7; i++) {
-        const date = new Date(today);
-        date.setDate(today.getDate() + i);
-        const dateStr = getLocalDateString(date);
+      
+      for (const med of results) {
+        // Calcular duración
+        let daysToGenerate = 7; // Default
+        if (med.duration) {
+          const num = parseInt(med.duration.match(/\d+/)?.[0] || "7");
+          if (!isNaN(num)) daysToGenerate = num;
+        }
 
-        for (const med of results) {
+        const endDate = new Date(today);
+        endDate.setDate(today.getDate() + daysToGenerate - 1);
+        const endDateStr = getLocalDateString(endDate);
+
+        for (let i = 0; i < daysToGenerate; i++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + i);
+          const dateStr = getLocalDateString(date);
+
           // Si es dosis única, solo lo guardamos para el primer día (i === 0)
           const isSingleDose = 
             med.frequency.toLowerCase().includes('única') || 
@@ -935,8 +1017,7 @@ const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
             
           if (isSingleDose && i > 0) continue;
 
-          // Usar los horarios definidos por el usuario (o sugeridos inicialmente)
-          const times = med.times || parseFrequency(med.frequency);
+          const times = med.times || parseFrequency(med.frequency, userSettings?.dayStartTime);
           for (const time of times) {
             const rRef = doc(collection(db, 'reminders'));
             batch.set(rRef, {
@@ -945,6 +1026,8 @@ const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
               dosage: med.dosage,
               time: time,
               date: dateStr,
+              endDate: endDateStr,
+              comments: med.comments || '',
               completed: false,
               prescriptionId: pRef.id
             });
@@ -1105,6 +1188,15 @@ const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
                     />
                   </div>
 
+                  {med.comments && (
+                    <div className="flex gap-2 p-2 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <Info className="w-4 h-4 text-indigo-500 mt-0.5 flex-shrink-0" />
+                      <p className="text-[10px] text-indigo-700 italic leading-relaxed">
+                        <b>Nota del doctor:</b> {med.comments}
+                      </p>
+                    </div>
+                  )}
+
                   {/* Edición de Horarios Individuales */}
                   <div className="space-y-2">
                     <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Horas de las tomas</p>
@@ -1183,9 +1275,36 @@ const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
 export default function App() {
   const [view, setView] = useState<View>('login');
   const [user, setUser] = useState<any>(null);
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string>('');
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   const [remindersToday, setRemindersToday] = useState<Medication[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    
+    // Fetch User Settings
+    const settingsRef = doc(db, 'user_settings', user.uid);
+    return onSnapshot(settingsRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setUserSettings(docSnap.data() as UserSettings);
+      } else {
+        // Default settings
+        const defaultSettings: UserSettings = {
+          uid: user.uid,
+          dayStartTime: '08:00',
+          acceptedTerms: true
+        };
+        setUserSettings(defaultSettings);
+        // Persist default settings
+        setDoc(settingsRef, {
+          ...defaultSettings,
+          updatedAt: serverTimestamp()
+        });
+      }
+    });
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -1445,6 +1564,7 @@ export default function App() {
       uid: user.uid,
       name: 'Medicina Demo',
       dosage: '1 pastilla de prueba',
+      frequency: 'Cada 24 horas',
       time: 'AHORA',
       date: '',
       completed: false
@@ -1481,7 +1601,7 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence mode="wait">
-        {view === 'login' && <Login key="login" />}
+        {view === 'login' && <Login key="login" onAcceptTerms={() => {}} />}
         {view === 'dashboard' && (
           <DashboardView 
             key="dashboard" 
@@ -1489,6 +1609,7 @@ export default function App() {
             user={user} 
             reminders={remindersToday} 
             onTestAlarm={handleTestAlarm} 
+            onOpenSettings={() => setShowSettings(true)}
             installPrompt={installPrompt}
             onInstall={handleInstall}
           />
@@ -1496,7 +1617,68 @@ export default function App() {
         {view === 'camera' && <CameraView key="camera" setView={setView} setCapturedImage={setCapturedImage} />}
         {view === 'calendar' && <CalendarView key="calendar" setView={setView} requestPermission={requestPermission} notificationPermission={notificationPermission} toggleComplete={toggleComplete} />}
         {view === 'gallery' && <GalleryView key="gallery" setView={setView} />}
-        {view === 'preview' && <PreviewView key="preview" setView={setView} capturedImage={capturedImage} />}
+        {view === 'preview' && <PreviewView key="preview" setView={setView} capturedImage={capturedImage} userSettings={userSettings} />}
+      </AnimatePresence>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {showSettings && (
+          <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="bg-white w-full max-w-lg rounded-t-[40px] p-8 shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-black text-zinc-900">Ajustes de Horario</h3>
+                <button onClick={() => setShowSettings(false)} className="w-10 h-10 bg-zinc-100 rounded-full flex items-center justify-center">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="space-y-6 mb-8">
+                <div className="p-4 bg-emerald-50 rounded-3xl border border-emerald-100">
+                  <p className="text-sm font-bold text-emerald-800 mb-2 flex items-center gap-2">
+                    <Bell className="w-4 h-4" /> 
+                    ¿A qué hora empieza tu día?
+                  </p>
+                  <p className="text-xs text-emerald-600 mb-4">
+                    Usaremos esta hora como base para programar tus medicamentos. Por ejemplo, si los tomas cada 8 horas, la primera dosis será a esta hora.
+                  </p>
+                  <input 
+                    type="time" 
+                    value={userSettings?.dayStartTime || '08:00'}
+                    onChange={async (e) => {
+                      if (!user) return;
+                      const newTime = e.target.value;
+                      await updateDoc(doc(db, 'user_settings', user.uid), {
+                        dayStartTime: newTime,
+                        updatedAt: serverTimestamp()
+                      });
+                    }}
+                    className="w-full py-4 px-6 bg-white border border-emerald-200 rounded-2xl text-2xl font-black text-center text-emerald-600 focus:ring-4 focus:ring-emerald-500/20 outline-none transition-all"
+                  />
+                </div>
+
+                <div className="p-4 bg-zinc-50 rounded-3xl border border-zinc-100">
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Tus Preferencias</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-zinc-700">Términos y Condiciones</span>
+                    <span className="text-xs font-bold text-emerald-600 bg-emerald-100 px-2 py-1 rounded-lg">Aceptados</span>
+                  </div>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="w-full py-5 bg-zinc-900 text-white font-bold rounded-2xl shadow-xl active:scale-95 transition-all"
+              >
+                Guardar y Cerrar
+              </button>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
       
       {/* Persist bottom navigation on dashboard/calendar/gallery */}
