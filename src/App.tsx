@@ -496,29 +496,85 @@ const Login = ({ onAcceptTerms }: LoginProps) => {
           <p className="text-zinc-400 text-lg">Analiza tus recetas médicas con IA y nunca olvides una dosis.</p>
         </motion.div>
 
-        <div className="space-y-4">
-          <div className="p-4 bg-zinc-800/50 rounded-2xl border border-zinc-700/50 mb-4 text-left">
-            <div className="flex items-start gap-3">
-              <ShieldAlert className="w-5 h-5 text-amber-500 mt-1 flex-shrink-0" />
-              <div>
-                <p className="text-[11px] font-bold text-zinc-300 uppercase mb-1">Aviso Legal e IA</p>
-                <p className="text-[10px] text-zinc-400 leading-relaxed">
-                  Esta aplicación utiliza Inteligencia Artificial para el análisis de recetas. <b>La IA puede cometer errores.</b> Esta herramienta NO reemplaza el consejo médico profesional. Siempre verifique los horarios y dosis con su médico o farmacéutico antes de ingerir cualquier medicamento.
-                </p>
-              </div>
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <button 
+              onClick={handleLogin}
+              className="w-full py-5 bg-white text-zinc-900 font-bold rounded-2xl flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-xl"
+            >
+              <User className="w-5 h-5" />
+              Empezar ahora
+              <ArrowRight className="w-5 h-5 ml-2" />
+            </button>
+            
+            <div className="text-center px-6">
+              <p className="text-zinc-500 text-[10px] leading-relaxed">
+                Al iniciar sesión, confirmas que has leído y aceptas nuestro{' '}
+                <button 
+                  onClick={() => setShowTerms(true)}
+                  className="text-white font-bold underline decoration-zinc-600 underline-offset-2"
+                >
+                  Aviso Legal y Uso de IA
+                </button>
+              </p>
             </div>
           </div>
-
-          <button 
-            onClick={handleLogin}
-            className="w-full py-5 bg-white text-zinc-900 font-bold rounded-2xl flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-xl"
-          >
-            <User className="w-5 h-5" />
-            Empezar ahora
-            <ArrowRight className="w-5 h-5 ml-2" />
-          </button>
-          <p className="text-zinc-500 text-[10px] px-4">Al entrar, aceptas que esta es una herramienta de apoyo y entiendes las limitaciones de la IA.</p>
         </div>
+
+        {/* Full Terms Modal */}
+        <AnimatePresence>
+          {showTerms && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl"
+              >
+                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <ShieldAlert className="w-6 h-6 text-amber-500" />
+                    <h3 className="text-xl font-black text-white">Aviso Legal</h3>
+                  </div>
+                  <button onClick={() => setShowTerms(false)} className="text-zinc-500 hover:text-white">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+                
+                <div className="p-6 max-h-[50vh] overflow-y-auto space-y-4 text-sm text-zinc-400 leading-relaxed font-medium">
+                  <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
+                    <p className="text-amber-200 text-xs font-bold uppercase mb-2">Punto Crítico</p>
+                    <p>Esta aplicación es un <b>Asistente de Apoyo</b>. No es un dispositivo médico ni reemplaza la consulta con un profesional de la salud.</p>
+                  </div>
+
+                  <section className="space-y-2">
+                    <h4 className="text-zinc-200 font-bold">1. Uso de Inteligencia Artificial</h4>
+                    <p>Utilizamos modelos de IA para analizar imágenes de recetas. Aunque es avanzado, la IA puede malinterpretar la caligrafía o los nombres de medicamentos.</p>
+                  </section>
+
+                  <section className="space-y-2">
+                    <h4 className="text-zinc-200 font-bold">2. Validación Obligatoria</h4>
+                    <p>Es responsabilidad del usuario revisar que cada horario, dosis y medicamento coincida exactamente con lo indicado por su médico.</p>
+                  </section>
+
+                  <section className="space-y-2">
+                    <h4 className="text-zinc-200 font-bold">3. Auditoría de Seguridad</h4>
+                    <p>La IA de seguridad busca interacciones conocidas, pero no cubre el 100% de los casos posibles.</p>
+                  </section>
+                </div>
+
+                <div className="p-6 bg-zinc-800/30">
+                  <button 
+                    onClick={() => setShowTerms(false)}
+                    className="w-full py-4 bg-white text-zinc-900 font-bold rounded-2xl active:scale-95 transition-all"
+                  >
+                    Entendido y Acepto
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   );
@@ -958,7 +1014,11 @@ const PreviewView = ({ setView, capturedImage, userSettings }: PreviewViewProps)
           const snapshot = await getDocs(q);
           const historyMeds = snapshot.docs.map(d => d.data());
           
-          const audit = await performSecurityAudit(enhancedResults, historyMeds);
+          // Filtrar por medicamentos únicos para no enviar duplicados de cada toma
+          const uniqueHistoryMeds = Array.from(new Set(historyMeds.map(m => (m.name || '').toLowerCase())))
+            .map(name => historyMeds.find(m => (m.name || '').toLowerCase() === name));
+
+          const audit = await performSecurityAudit(enhancedResults, uniqueHistoryMeds);
           setAuditResults(audit);
           setIsAuditing(false);
         }

@@ -291,15 +291,14 @@ async function startServer() {
       if (minuteKey === lastCheckedTime) return;
       lastCheckedTime = minuteKey;
 
-      console.log(`[Worker] Ciclo: ${nowUtc.toISOString()}. Project: ${clientApp.options.projectId}, DB: ${databaseId || '(default)'}`);
-
+      console.log(`[Worker] Ciclo: ${nowUtc.toISOString()}. Project: ${firebaseConfig.projectId}, DB: ${databaseId || '(default)'}`);
+      
       let subSnapshot;
       try {
-        const subsCol = collection(clientDb, "push_subscriptions");
-        subSnapshot = await getDocs(subsCol);
+        // Usamos el Admin SDK (db) para evitar problemas de permisos en el worker del servidor
+        subSnapshot = await db.collection("push_subscriptions").get();
       } catch (e: any) {
-        console.error("[Worker] Error consultando subscripciones (Client SDK):", e.code, e.message);
-        // Si falla el cliente, el admin probablemente también, pero informamos
+        console.error("[Worker] Error consultando subscripciones (Admin SDK):", e.message);
         return;
       }
 
@@ -334,15 +333,13 @@ async function startServer() {
 
         console.log(`[Worker] Revisando recordatorios para usuario ${uid} en su hora local ${dateStr} ${timeStr}`);
 
-        // 2. Buscar recordatorios para este usuario en su hora local
-        const remindersCol = collection(clientDb, 'reminders');
-        const q = query(remindersCol, 
-          where('uid', '==', uid),
-          where('date', '==', dateStr),
-          where('time', '==', timeStr),
-          where('completed', '==', false)
-        );
-        const remindersSnapshot = await getDocs(q);
+        // 2. Buscar recordatorios para este usuario en su hora local usando Admin SDK
+        const remindersSnapshot = await db.collection('reminders')
+          .where('uid', '==', uid)
+          .where('date', '==', dateStr)
+          .where('time', '==', timeStr)
+          .where('completed', '==', false)
+          .get();
 
         if (remindersSnapshot.empty) {
           continue;
@@ -362,11 +359,11 @@ async function startServer() {
           console.log(`[Worker] Enviando notificación push a endpoint: ${subscription.endpoint.slice(0, 30)}...`);
           webpush.sendNotification(subscription, payload)
             .then(() => console.log(`[Worker] Notificación enviada con éxito a ${uid}`))
-            .catch(err => {
+            .catch(async err => {
               console.error(`[Worker] Error enviando a ${subDoc.id}:`, err.statusCode);
               if (err.statusCode === 410 || err.statusCode === 404) {
                 console.log(`[Worker] Borrando suscripción obsoleta ${subDoc.id}`);
-                deleteDoc(subDoc.ref).catch(() => {});
+                await subDoc.ref.delete().catch(() => {});
               }
             });
         }
