@@ -192,6 +192,60 @@ async function startServer() {
     }
   });
 
+  expApp.post("/api/security-audit", async (req, res) => {
+    const { newMeds, historyMeds } = req.body;
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return res.status(500).json({ error: "API_KEY_MISSING" });
+    }
+
+    try {
+      const client = new GoogleGenAI({ apiKey });
+      const model = "gemini-3-flash-preview";
+
+      const prompt = `Actúa como un experto en farmacología clínica y seguridad del paciente. 
+      Analiza la interacción entre los NUEVOS medicamentos de una receta y el HISTORIAL médico del paciente.
+      
+      NUEVOS MEDICAMENTOS: ${JSON.stringify(newMeds)}
+      HISTORIAL (lo que ya toma): ${JSON.stringify(historyMeds)}
+      
+      TAREAS:
+      1. Busca interacciones medicamentosas peligrosas entre los nuevos y los existentes.
+      2. Advierte sobre dosis potencialmente altas o frecuencias inusuales.
+      3. Proporciona consejos de seguridad (ej. "no tomar con alcohol", "tomar con alimentos").
+      4. Asigna un "Puntaje de Seguridad" de 0 a 100.
+      
+      Devuelve un JSON estrictamente con este esquema:
+      {
+        "safetyScore": number,
+        "warnings": string[],
+        "interactions": { "medA": string, "medB": string, "risk": "low"|"medium"|"high", "description": string }[],
+        "recommendations": string[]
+      }`;
+
+      const response = await client.models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }]
+          }
+        ],
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      const audit = JSON.parse(response.text || "{}");
+      res.json(audit);
+
+    } catch (error: any) {
+      console.error("Error en auditoría de seguridad:", error);
+      res.status(500).json({ error: "AUDIT_ERROR", message: error.message });
+    }
+  });
+
   // --- Vite / Static Assets (Front-end) ---
 
   if (process.env.NODE_ENV !== "production") {

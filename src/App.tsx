@@ -18,7 +18,11 @@ import {
   Loader2,
   Trash2,
   Edit2,
-  Download
+  Download,
+  ShieldCheck,
+  AlertTriangle,
+  Info,
+  ShieldAlert
 } from 'lucide-react';
 import { 
   auth, 
@@ -83,6 +87,28 @@ const analyzePrescription = async (base64Image: string) => {
     return await response.json();
   } catch (error: any) {
     console.error("Error analizando receta:", error);
+    throw error;
+  }
+};
+
+const performSecurityAudit = async (newMeds: any[], historyMeds: any[]) => {
+  try {
+    const response = await fetch("/api/security-audit", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ newMeds, historyMeds }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: "Error en auditoría" }));
+      throw new Error(errorData.message || "Error al realizar auditoría");
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    console.error("Error en auditoría de seguridad:", error);
     throw error;
   }
 };
@@ -829,41 +855,52 @@ interface PreviewViewProps {
 const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
   const [isProcessing, setIsProcessing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAuditing, setIsAuditing] = useState(false);
   const [results, setResults] = useState<any[]>([]);
+  const [auditResults, setAuditResults] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const processImage = async () => {
+    const processImageAndAudit = async () => {
       try {
         setError(null);
+        // 1. Analizar imagen
         const meds = await analyzePrescription(capturedImage);
+        
         if (meds.length === 0) {
           setError("No se detectaron medicamentos en la imagen. Intenta con una foto más clara.");
-        } else {
-          const enhancedResults = meds.map((m: any) => ({
-            ...m,
-            times: parseFrequency(m.frequency)
-          }));
-          setResults(enhancedResults);
+          setIsProcessing(false);
+          return;
         }
+
+        const enhancedResults = meds.map((m: any) => ({
+          ...m,
+          times: parseFrequency(m.frequency)
+        }));
+        setResults(enhancedResults);
         setIsProcessing(false);
+
+        // 2. Realizar auditoría de seguridad
+        if (auth.currentUser) {
+          setIsAuditing(true);
+          // Obtener medicamentos actuales del usuario para comparar
+          const q = query(collection(db, 'reminders'), where('uid', '==', auth.currentUser.uid));
+          const snapshot = await getDocs(q);
+          const historyMeds = snapshot.docs.map(d => d.data());
+          
+          const audit = await performSecurityAudit(enhancedResults, historyMeds);
+          setAuditResults(audit);
+          setIsAuditing(false);
+        }
+
       } catch (err: any) {
         console.error("Gemini error:", err);
-        if (err.message === 'API_KEY_MISSING') {
-          setError("Falta la API Key en GitHub Secrets (GEMINI_API_KEY).");
-        } else if (err.message === 'INVALID_API_KEY') {
-          setError("La API Key proporcionada no es válida.");
-        } else if (err.message === 'SAFETY_BLOCK') {
-          setError("La IA bloqueó el análisis por contenido sensible. Intenta con otra foto.");
-        } else if (err.message?.includes('leaked')) {
-          setError("Tu API Key ha sido bloqueada por seguridad (leaked). Por favor, genera una nueva en Google AI Studio y regístrala en GitHub Secrets.");
-        } else {
-          setError(`Ocurrió un error técnico: ${err.message || 'Error desconocido'}`);
-        }
+        setError(`Ocurrió un error: ${err.message || 'Error desconocido'}`);
         setIsProcessing(false);
+        setIsAuditing(false);
       }
     };
-    processImage();
+    processImageAndAudit();
   }, [capturedImage]);
 
   const saveReminders = async () => {
@@ -964,6 +1001,70 @@ const PreviewView = ({ setView, capturedImage }: PreviewViewProps) => {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-bold text-zinc-900">Configurar Horarios</h3>
               <span className="text-xs font-semibold px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg">IA Detectado</span>
+            </div>
+
+            {/* IA Security Audit Section */}
+            <div className="mb-8">
+              {isAuditing ? (
+                <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-center gap-3">
+                  <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+                  <p className="text-sm font-semibold text-indigo-600">Verificando seguridad con IA...</p>
+                </div>
+              ) : auditResults ? (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-4"
+                >
+                  <div className={`p-4 rounded-3xl border ${auditResults.safetyScore > 80 ? 'bg-emerald-50 border-emerald-100' : auditResults.safetyScore > 50 ? 'bg-amber-50 border-amber-100' : 'bg-rose-50 border-rose-100'}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        {auditResults.safetyScore > 80 ? <ShieldCheck className="w-5 h-5 text-emerald-600" /> : <ShieldAlert className="w-5 h-5 text-amber-600" />}
+                        <span className="font-bold text-zinc-900">Auditoría de Seguridad</span>
+                      </div>
+                      <span className={`text-lg font-black ${auditResults.safetyScore > 80 ? 'text-emerald-600' : auditResults.safetyScore > 50 ? 'text-amber-600' : 'text-rose-600'}`}>
+                        {auditResults.safetyScore}%
+                      </span>
+                    </div>
+
+                    {auditResults.warnings?.length > 0 && (
+                      <div className="space-y-2 mb-3">
+                        {auditResults.warnings.map((w: string, i: number) => (
+                          <div key={i} className="flex gap-2 text-xs text-rose-700 font-medium bg-rose-100/50 p-2 rounded-lg">
+                            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                            {w}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {auditResults.interactions?.length > 0 && (
+                      <div className="space-y-2 mb-3">
+                        {auditResults.interactions.map((inter: any, i: number) => (
+                          <div key={i} className="p-3 bg-white/50 rounded-xl border border-zinc-100">
+                             <div className="flex items-center gap-2 mb-1">
+                               <AlertTriangle className={`w-4 h-4 ${inter.risk === 'high' ? 'text-rose-600' : 'text-amber-600'}`} />
+                               <span className="text-xs font-bold text-zinc-900 capitalize">Riesgo {inter.risk}: {inter.medA} + {inter.medB}</span>
+                             </div>
+                             <p className="text-[10px] text-zinc-500">{inter.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {auditResults.recommendations?.length > 0 && (
+                      <div className="space-y-1">
+                        {auditResults.recommendations.map((rec: string, i: number) => (
+                          <div key={i} className="flex gap-2 text-[10px] text-indigo-700 font-semibold italic">
+                            <Info className="w-3 h-3 flex-shrink-0" />
+                            {rec}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              ) : null}
             </div>
             
             <div className="space-y-4 mb-8">
